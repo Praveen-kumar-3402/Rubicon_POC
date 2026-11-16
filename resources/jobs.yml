@@ -1,0 +1,34 @@
+resources:
+  jobs:
+    vendor_discovery_pipeline:
+      name: rubicon-vendor-discovery-${bundle.target}
+      # Serverless notebook tasks (no cluster section). Add a job cluster here if serverless is not enabled.
+      queue: { enabled: true }
+      parameters:
+        - { name: catalog, default: "${var.catalog}" }
+        - { name: source_catalog, default: "${var.source_catalog}" }
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../notebooks/00_setup.py
+            base_parameters: { catalog: "{{job.parameters.catalog}}" }
+        - task_key: bronze
+          depends_on: [{ task_key: setup }]
+          notebook_task:
+            notebook_path: ../notebooks/01_bronze.py
+            base_parameters: { catalog: "{{job.parameters.catalog}}", source_catalog: "{{job.parameters.source_catalog}}" }
+        - task_key: silver
+          depends_on: [{ task_key: bronze }]
+          notebook_task:
+            notebook_path: ../notebooks/02_silver.py
+            base_parameters: { catalog: "{{job.parameters.catalog}}", source_catalog: "{{job.parameters.source_catalog}}" }
+        - task_key: gold
+          depends_on: [{ task_key: silver }]
+          notebook_task:
+            notebook_path: ../notebooks/03_gold.py
+            base_parameters: { catalog: "{{job.parameters.catalog}}" }
+        - task_key: checks
+          depends_on: [{ task_key: gold }]
+          notebook_task:
+            notebook_path: ../notebooks/04_checks.py
+            base_parameters: { catalog: "{{job.parameters.catalog}}" }

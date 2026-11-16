@@ -1,0 +1,8 @@
+resources:
+  dashboards:
+    pr_vendor_view:
+      display_name: "Rubicon - Packaging PR vendor view [${bundle.target}]"
+      file_path: ../dashboards/pr_vendor_view.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: gold

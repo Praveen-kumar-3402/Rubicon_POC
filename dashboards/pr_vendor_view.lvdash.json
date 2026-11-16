@@ -1,0 +1,2780 @@
+{
+  "datasets": [
+    {
+      "name": "ds_vendor_spec",
+      "displayName": "ds_vendor_spec",
+      "queryLines": [
+        "SELECT\n",
+        "  vs.*,\n",
+        "  s.pr,\n",
+        "  s.material_name\n",
+        "FROM\n",
+        "  gold.v_vendor_spec vs\n",
+        "    JOIN gold.v_pr_summary s\n",
+        "      ON s.pr_line = vs.pr_line\n",
+        "ORDER BY\n",
+        "  vs.pr_line,\n",
+        "  vs.test_seq,\n",
+        "  vs.seg_no"
+      ]
+    },
+    {
+      "name": "ds_pr_list",
+      "displayName": "ds_pr_list",
+      "queryLines": [
+        "SELECT\n",
+        "  pr,\n",
+        "  pr_date,\n",
+        "  age_days,\n",
+        "  initcap(priority) AS priority,\n",
+        "  plant,\n",
+        "  buyer,\n",
+        "  category,\n",
+        "  replace(initcap(replace(tat_status, '_', ' ')), 'Avl', 'AVL') AS tat_status,\n",
+        "  tat_max_elapsed_days,\n",
+        "  tat_min_remaining_days,\n",
+        "  replace(initcap(replace(action_status, '_', ' ')), 'Avl', 'AVL') AS action_status,\n",
+        "  lines,\n",
+        "  materials,\n",
+        "  open_lines,\n",
+        "  partially_ordered_lines,\n",
+        "  exception_count,\n",
+        "  lines_with_exceptions,\n",
+        "  replace(initcap(replace(exceptions, '_', ' ')), 'Avl', 'AVL') AS exceptions,\n",
+        "  exception_flag\n",
+        "FROM\n",
+        "  gold.v_pr_list\n",
+        "ORDER BY\n",
+        "  CASE priority\n",
+        "    WHEN 'NEW' THEN 1\n",
+        "    ELSE 2\n",
+        "  END,\n",
+        "  pr_date DESC"
+      ]
+    },
+    {
+      "name": "ds_exceptions_detail",
+      "displayName": "ds_exceptions_detail",
+      "queryLines": [
+        "SELECT\n",
+        "  e.pr,\n",
+        "  e.pr_line,\n",
+        "  e.plant,\n",
+        "  e.buyer,\n",
+        "  initcap(e.pack_category) AS pack_category,\n",
+        "  e.material,\n",
+        "  e.material_name,\n",
+        "  e.pr_date,\n",
+        "  replace(initcap(replace(e.exception, '_', ' ')), 'Avl', 'AVL') AS exception,\n",
+        "  e.reason\n",
+        "FROM\n",
+        "  gold.v_pr_exceptions e\n",
+        "ORDER BY\n",
+        "  e.pr,\n",
+        "  e.pr_line,\n",
+        "  e.exception"
+      ]
+    },
+    {
+      "name": "ds_pr_materials",
+      "displayName": "ds_pr_materials",
+      "queryLines": [
+        "SELECT\n",
+        "  pr,\n",
+        "  pr_item,\n",
+        "  pr_line,\n",
+        "  pr_date,\n",
+        "  material,\n",
+        "  material_name,\n",
+        "  initcap(pack_category) AS pack_category,\n",
+        "  plant,\n",
+        "  qty,\n",
+        "  uom,\n",
+        "  replace(initcap(replace(pr_status, '_', ' ')), 'Avl', 'AVL') AS pr_status,\n",
+        "  replace(initcap(replace(source_type, '_', ' ')), 'Avl', 'AVL') AS source_type,\n",
+        "  buyer,\n",
+        "  category,\n",
+        "  replace(initcap(replace(tat_status, '_', ' ')), 'Avl', 'AVL') AS tat_status,\n",
+        "  tat_elapsed_days,\n",
+        "  tat_remaining_days,\n",
+        "  tat_missed_bucket,\n",
+        "  replace(initcap(replace(action_status, '_', ' ')), 'Avl', 'AVL') AS action_status,\n",
+        "  non_action_reason,\n",
+        "  approved_vendors,\n",
+        "  qualified_vendors,\n",
+        "  vendors_with_spec,\n",
+        "  replace(initcap(replace(exceptions, '_', ' ')), 'Avl', 'AVL') AS exceptions\n",
+        "FROM\n",
+        "  gold.v_pr_summary\n",
+        "ORDER BY\n",
+        "  pr,\n",
+        "  pr_item"
+      ]
+    },
+    {
+      "name": "ds_spec_slots",
+      "displayName": "ds_spec_slots",
+      "queryLines": [
+        "WITH mat AS (\n",
+        "  SELECT\n",
+        "    material,\n",
+        "    MAX(material_name) AS material_name\n",
+        "  FROM\n",
+        "    gold.v_pr_summary\n",
+        "  GROUP BY\n",
+        "    material\n",
+        "),\n",
+        "spec AS (\n",
+        "  SELECT DISTINCT\n",
+        "    material,\n",
+        "    mpn,\n",
+        "    manufacturer_name,\n",
+        "    qual_status,\n",
+        "    parameter_label,\n",
+        "    spec_text\n",
+        "  FROM\n",
+        "    gold.v_vendor_spec\n",
+        "),\n",
+        "slot AS (\n",
+        "  SELECT\n",
+        "    material,\n",
+        "    mpn,\n",
+        "    manufacturer_name,\n",
+        "    MAX(qual_status) AS qual_status,\n",
+        "    DENSE_RANK() OVER (PARTITION BY material ORDER BY manufacturer_name, mpn) AS n\n",
+        "  FROM\n",
+        "    spec\n",
+        "  GROUP BY\n",
+        "    material,\n",
+        "    mpn,\n",
+        "    manufacturer_name\n",
+        ")\n",
+        "SELECT\n",
+        "  m.material,\n",
+        "  m.material_name,\n",
+        "  s.manufacturer_name AS manufacturer_name,\n",
+        "  CONCAT('Vendor ', s.n) AS vendor_slot,\n",
+        "  '00 Manufacturer' AS parameter_label,\n",
+        "  s.manufacturer_name AS spec_text\n",
+        "FROM\n",
+        "  slot s\n",
+        "    JOIN mat m\n",
+        "      ON m.material = s.material\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  m.material,\n",
+        "  m.material_name,\n",
+        "  s.manufacturer_name,\n",
+        "  CONCAT('Vendor ', s.n),\n",
+        "  '01 Qualification status',\n",
+        "  s.qual_status\n",
+        "FROM\n",
+        "  slot s\n",
+        "    JOIN mat m\n",
+        "      ON m.material = s.material\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  m.material,\n",
+        "  m.material_name,\n",
+        "  sl.manufacturer_name,\n",
+        "  CONCAT('Vendor ', sl.n),\n",
+        "  sp.parameter_label,\n",
+        "  array_join(array_sort(collect_set(sp.spec_text)), ' | ')\n",
+        "FROM\n",
+        "  spec sp\n",
+        "    JOIN slot sl\n",
+        "      ON sl.material = sp.material\n",
+        "      AND sl.mpn = sp.mpn\n",
+        "    JOIN mat m\n",
+        "      ON m.material = sp.material\n",
+        "GROUP BY\n",
+        "  m.material,\n",
+        "  m.material_name,\n",
+        "  sl.manufacturer_name,\n",
+        "  sl.n,\n",
+        "  sp.parameter_label"
+      ]
+    },
+    {
+      "name": "ds_material_vendors",
+      "displayName": "ds_material_vendors",
+      "queryLines": [
+        "SELECT\n",
+        "  s.pr,\n",
+        "  v.pr_line,\n",
+        "  v.material,\n",
+        "  s.material_name,\n",
+        "  v.manufacturer_name,\n",
+        "  v.supplier_name,\n",
+        "  CASE v.vendor_role\n",
+        "    WHEN 'CURRENT' THEN 'Current'\n",
+        "    WHEN 'HISTORICAL' THEN 'Historical'\n",
+        "    WHEN 'HISTORICAL_NOT_QUALIFIED' THEN 'Historical, not qualified'\n",
+        "    ELSE 'Alternative'\n",
+        "  END AS vendor_role,\n",
+        "  v.last_po_date,\n",
+        "  v.po_count,\n",
+        "  v.qual_status,\n",
+        "  v.qual_due,\n",
+        "  v.price_status,\n",
+        "  v.price_text,\n",
+        "  v.price_validity,\n",
+        "  v.price_valid_from,\n",
+        "  v.price_valid_to,\n",
+        "  v.lead_time_days,\n",
+        "  v.standard_po_qty,\n",
+        "  v.source_list,\n",
+        "  v.manufacturer_country,\n",
+        "  v.storage_condition,\n",
+        "  v.last_po_number,\n",
+        "  v.last_po_qty,\n",
+        "  v.last_po_unit,\n",
+        "  v.last_po_delivery_date,\n",
+        "  v.last_po_created_by,\n",
+        "  v.has_spec,\n",
+        "  v.specification_no,\n",
+        "  v.edition_no,\n",
+        "  v.spec_effective_date\n",
+        "FROM\n",
+        "  gold.v_vendor_options v\n",
+        "    JOIN gold.v_pr_summary s\n",
+        "      ON s.pr_line = v.pr_line\n",
+        "WHERE\n",
+        "  v.mpn IS NOT NULL\n",
+        "ORDER BY\n",
+        "  s.pr,\n",
+        "  v.material,\n",
+        "  CASE v.vendor_role\n",
+        "    WHEN 'CURRENT' THEN 1\n",
+        "    WHEN 'HISTORICAL' THEN 2\n",
+        "    WHEN 'HISTORICAL_NOT_QUALIFIED' THEN 3\n",
+        "    ELSE 4\n",
+        "  END,\n",
+        "  v.manufacturer_name"
+      ]
+    },
+    {
+      "name": "ds_buyers",
+      "displayName": "ds_buyers",
+      "queryLines": [
+        "SELECT\n",
+        "  buyer,\n",
+        "  prs,\n",
+        "  new_prs,\n",
+        "  backlog_prs,\n",
+        "  action_prs,\n",
+        "  non_action_prs,\n",
+        "  oldest_pr_date,\n",
+        "  lines,\n",
+        "  tat_missed_lines,\n",
+        "  tat_risk_lines,\n",
+        "  tat_within_lines,\n",
+        "  action_lines,\n",
+        "  non_action_lines,\n",
+        "  lines_with_exceptions,\n",
+        "  tat_max_elapsed_days\n",
+        "FROM\n",
+        "  gold.v_buyer_summary\n",
+        "ORDER BY\n",
+        "  prs DESC, buyer"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "4d14ca06",
+      "displayName": "Open PRs",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "style": {
+                "fontColor": {
+                  "light": "#FFFFFF",
+                  "dark": "#FFFFFF"
+                }
+              },
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "<span style=\"text-align:center;display:block\"><span style=\"font-size: 14px;\">**Rubicon Research | Open packaging PRs**</span></span>"
+                  ],
+                  "fields": []
+                }
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              },
+              "widgetBorderColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "nf_plant",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_plant",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "plant",
+                      "expression": "`plant`"
+                    },
+                    {
+                      "name": "plant_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Plant",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "plant",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_plant"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "nf_priority",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_priority",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "priority",
+                      "expression": "`priority`"
+                    },
+                    {
+                      "name": "priority_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Priority",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "priority",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_priority"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "nf_excflag",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_exception_flag",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "exception_flag",
+                      "expression": "`exception_flag`"
+                    },
+                    {
+                      "name": "exception_flag_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Exceptions",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "exception_flag",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_exception_flag"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "tiles_priority",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "priority",
+                      "expression": "`priority`"
+                    },
+                    {
+                      "name": "prs",
+                      "expression": "COUNT(`pr`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Open PRs by priority",
+                  "fields": []
+                }
+              },
+              "version": 1,
+              "jsonSpec": {
+                "type": "vega-lite",
+                "spec": "{\"$schema\":\"https://vega.github.io/schema/vega-lite/v6.json\",\"data\":{\"name\":\"databricks_query\"},\"width\":\"container\",\"height\":\"container\",\"config\":{\"autosize\":{\"type\":\"fit\",\"contains\":\"padding\"},\"view\":{\"stroke\":null}},\"encoding\":{\"x\":{\"field\":\"priority\",\"type\":\"nominal\",\"axis\":null,\"sort\":[\"New\",\"Backlog\"],\"scale\":{\"paddingInner\":0.06}}},\"layer\":[{\"mark\":{\"type\":\"bar\",\"cornerRadius\":6},\"encoding\":{\"color\":{\"field\":\"priority\",\"type\":\"nominal\",\"scale\":{\"domain\":[\"New\",\"Backlog\"],\"range\":[\"#066A98\",\"#6B7A90\"]},\"legend\":null},\"tooltip\":[{\"field\":\"priority\",\"title\":\"Priority\"},{\"field\":\"prs\",\"title\":\"PRs\"}]}},{\"mark\":{\"type\":\"text\",\"dy\":-10,\"fontSize\":30,\"fontWeight\":\"bold\",\"color\":\"#FFFFFF\"},\"encoding\":{\"text\":{\"field\":\"prs\",\"type\":\"quantitative\"}}},{\"mark\":{\"type\":\"text\",\"dy\":22,\"fontSize\":13,\"color\":\"#FFFFFF\"},\"encoding\":{\"text\":{\"field\":\"priority\",\"type\":\"nominal\"}}}]}"
+              },
+              "widgetType": "custom-vega-viz",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "priority"
+                  },
+                  {
+                    "fieldName": "prs"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "tiles_excflag",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "exception_flag",
+                      "expression": "`exception_flag`"
+                    },
+                    {
+                      "name": "prs",
+                      "expression": "COUNT(`pr`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Open PRs with and without exceptions",
+                  "fields": []
+                }
+              },
+              "version": 1,
+              "jsonSpec": {
+                "type": "vega-lite",
+                "spec": "{\"$schema\":\"https://vega.github.io/schema/vega-lite/v6.json\",\"data\":{\"name\":\"databricks_query\"},\"width\":\"container\",\"height\":\"container\",\"config\":{\"autosize\":{\"type\":\"fit\",\"contains\":\"padding\"},\"view\":{\"stroke\":null}},\"encoding\":{\"x\":{\"field\":\"exception_flag\",\"type\":\"nominal\",\"axis\":null,\"sort\":\"ascending\",\"scale\":{\"paddingInner\":0.06}}},\"layer\":[{\"mark\":{\"type\":\"bar\",\"cornerRadius\":6},\"encoding\":{\"color\":{\"field\":\"exception_flag\",\"type\":\"nominal\",\"sort\":\"ascending\",\"scale\":{\"range\":[\"#066A98\",\"#388CB8\"]},\"legend\":null},\"tooltip\":[{\"field\":\"exception_flag\",\"title\":\"Exceptions\"},{\"field\":\"prs\",\"title\":\"PRs\"}]}},{\"mark\":{\"type\":\"text\",\"dy\":-10,\"fontSize\":30,\"fontWeight\":\"bold\",\"color\":\"#FFFFFF\"},\"encoding\":{\"text\":{\"field\":\"prs\",\"type\":\"quantitative\"}}},{\"mark\":{\"type\":\"text\",\"dy\":22,\"fontSize\":13,\"color\":\"#FFFFFF\"},\"encoding\":{\"text\":{\"field\":\"exception_flag\",\"type\":\"nominal\"}}}]}"
+              },
+              "widgetType": "custom-vega-viz",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "exception_flag"
+                  },
+                  {
+                    "fieldName": "prs"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 5,
+            "width": 6,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "t_open_prs",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "pr",
+                      "expression": "`pr`"
+                    },
+                    {
+                      "name": "pr_date",
+                      "expression": "`pr_date`"
+                    },
+                    {
+                      "name": "age_days",
+                      "expression": "`age_days`"
+                    },
+                    {
+                      "name": "priority",
+                      "expression": "`priority`"
+                    },
+                    {
+                      "name": "plant",
+                      "expression": "`plant`"
+                    },
+                    {
+                      "name": "lines",
+                      "expression": "`lines`"
+                    },
+                    {
+                      "name": "materials",
+                      "expression": "`materials`"
+                    },
+                    {
+                      "name": "open_lines",
+                      "expression": "`open_lines`"
+                    },
+                    {
+                      "name": "partially_ordered_lines",
+                      "expression": "`partially_ordered_lines`"
+                    },
+                    {
+                      "name": "exception_count",
+                      "expression": "`exception_count`"
+                    },
+                    {
+                      "name": "exceptions",
+                      "expression": "`exceptions`"
+                    },
+                    {
+                      "name": "buyer",
+                      "expression": "`buyer`"
+                    },
+                    {
+                      "name": "tat_status",
+                      "expression": "`tat_status`"
+                    },
+                    {
+                      "name": "tat_max_elapsed_days",
+                      "expression": "`tat_max_elapsed_days`"
+                    },
+                    {
+                      "name": "action_status",
+                      "expression": "`action_status`"
+                    }
+                  ],
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`plant`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Open PRs",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "pr"
+                  },
+                  {
+                    "fieldName": "pr_date"
+                  },
+                  {
+                    "fieldName": "age_days"
+                  },
+                  {
+                    "fieldName": "priority",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "New"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#066A98",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Backlog"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#6B7A90",
+                          "foregroundColor": "#FFFFFF"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "buyer"
+                  },
+                  {
+                    "fieldName": "tat_status",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Missed"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#C8372D",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Risk"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#E0A100",
+                          "foregroundColor": "#333333"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Within"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#2E8B57",
+                          "foregroundColor": "#FFFFFF"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "tat_max_elapsed_days"
+                  },
+                  {
+                    "fieldName": "action_status",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "No Exception"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#2E8B57",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Has Exceptions"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#C8372D",
+                          "foregroundColor": "#FFFFFF"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "plant"
+                  },
+                  {
+                    "fieldName": "lines"
+                  },
+                  {
+                    "fieldName": "materials"
+                  },
+                  {
+                    "fieldName": "open_lines"
+                  },
+                  {
+                    "fieldName": "partially_ordered_lines"
+                  },
+                  {
+                    "fieldName": "exception_count"
+                  },
+                  {
+                    "fieldName": "exceptions"
+                  }
+                ],
+                "rowOrder": [
+                  {
+                    "by": "column",
+                    "field": {
+                      "index": 8
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 12,
+            "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "nf_buyer",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_buyer",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "buyer",
+                      "expression": "`buyer`"
+                    },
+                    {
+                      "name": "buyer_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Buyer (PR creator)",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "buyer",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_buyer"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "nf_tat",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_tat_status",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "tat_status",
+                      "expression": "`tat_status`"
+                    },
+                    {
+                      "name": "tat_status_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "TAT status",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "tat_status",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_tat_status"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "nf_action",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_action_status",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "action_status",
+                      "expression": "`action_status`"
+                    },
+                    {
+                      "name": "action_status_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Exception status",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "action_status",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_action_status"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 3,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "buyers",
+      "displayName": "Buyers",
+      "layout": [
+        {
+          "widget": {
+            "name": "band",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "style": {
+                "fontColor": {
+                  "light": "#FFFFFF",
+                  "dark": "#FFFFFF"
+                }
+              },
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "<span style=\"text-align:center;display:block\"><span style=\"font-size: 14px;\">**Buyers** - right-click a buyer and choose Drill to Open PRs</span></span>"
+                  ],
+                  "fields": []
+                }
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              },
+              "widgetBorderColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "t_buyers",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_buyers",
+                  "fields": [
+                    {
+                      "name": "buyer",
+                      "expression": "`buyer`"
+                    },
+                    {
+                      "name": "prs",
+                      "expression": "`prs`"
+                    },
+                    {
+                      "name": "new_prs",
+                      "expression": "`new_prs`"
+                    },
+                    {
+                      "name": "backlog_prs",
+                      "expression": "`backlog_prs`"
+                    },
+                    {
+                      "name": "action_prs",
+                      "expression": "`action_prs`"
+                    },
+                    {
+                      "name": "non_action_prs",
+                      "expression": "`non_action_prs`"
+                    },
+                    {
+                      "name": "oldest_pr_date",
+                      "expression": "`oldest_pr_date`"
+                    },
+                    {
+                      "name": "lines",
+                      "expression": "`lines`"
+                    },
+                    {
+                      "name": "tat_missed_lines",
+                      "expression": "`tat_missed_lines`"
+                    },
+                    {
+                      "name": "tat_risk_lines",
+                      "expression": "`tat_risk_lines`"
+                    },
+                    {
+                      "name": "tat_within_lines",
+                      "expression": "`tat_within_lines`"
+                    },
+                    {
+                      "name": "action_lines",
+                      "expression": "`action_lines`"
+                    },
+                    {
+                      "name": "non_action_lines",
+                      "expression": "`non_action_lines`"
+                    },
+                    {
+                      "name": "lines_with_exceptions",
+                      "expression": "`lines_with_exceptions`"
+                    },
+                    {
+                      "name": "tat_max_elapsed_days",
+                      "expression": "`tat_max_elapsed_days`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "PR creators (buyers) and their PRs",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "buyer"
+                  },
+                  {
+                    "fieldName": "prs"
+                  },
+                  {
+                    "fieldName": "new_prs"
+                  },
+                  {
+                    "fieldName": "backlog_prs"
+                  },
+                  {
+                    "fieldName": "action_prs"
+                  },
+                  {
+                    "fieldName": "non_action_prs"
+                  },
+                  {
+                    "fieldName": "oldest_pr_date"
+                  },
+                  {
+                    "fieldName": "lines"
+                  },
+                  {
+                    "fieldName": "tat_missed_lines"
+                  },
+                  {
+                    "fieldName": "tat_risk_lines"
+                  },
+                  {
+                    "fieldName": "tat_within_lines"
+                  },
+                  {
+                    "fieldName": "action_lines"
+                  },
+                  {
+                    "fieldName": "non_action_lines"
+                  },
+                  {
+                    "fieldName": "lines_with_exceptions"
+                  },
+                  {
+                    "fieldName": "tat_max_elapsed_days"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 12
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "pr_materials",
+      "displayName": "PR materials",
+      "layout": [
+        {
+          "widget": {
+            "name": "band",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "style": {
+                "fontColor": {
+                  "light": "#FFFFFF",
+                  "dark": "#FFFFFF"
+                }
+              },
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "<span style=\"text-align:center;display:block\"><span style=\"font-size: 14px;\">**PR materials** - right-click a material and choose Drill to Vendors and specs</span></span>"
+                  ],
+                  "fields": []
+                }
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              },
+              "widgetBorderColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "f_pr",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_pr",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "pr",
+                      "expression": "`pr`"
+                    },
+                    {
+                      "name": "pr_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e7fc3f13099ac5eace9352f948_pr",
+                "query": {
+                  "datasetName": "ds_pr_materials",
+                  "fields": [
+                    {
+                      "name": "pr",
+                      "expression": "`pr`"
+                    },
+                    {
+                      "name": "pr_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1ddc5bf9e11379d8b108a6233b3d5_pr",
+                "query": {
+                  "datasetName": "ds_material_vendors",
+                  "fields": [
+                    {
+                      "name": "pr",
+                      "expression": "`pr`"
+                    },
+                    {
+                      "name": "pr_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d151a2487fe51ac866da4cb_pr",
+                "query": {
+                  "datasetName": "ds_vendor_spec",
+                  "fields": [
+                    {
+                      "name": "pr",
+                      "expression": "`pr`"
+                    },
+                    {
+                      "name": "pr_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21e701cb6974bab1bedb330f3_pr",
+                "query": {
+                  "datasetName": "ds_exceptions_detail",
+                  "fields": [
+                    {
+                      "name": "pr",
+                      "expression": "`pr`"
+                    },
+                    {
+                      "name": "pr_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Select PR"
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "pr",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_pr"
+                  },
+                  {
+                    "fieldName": "pr",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e7fc3f13099ac5eace9352f948_pr"
+                  },
+                  {
+                    "fieldName": "pr",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1ddc5bf9e11379d8b108a6233b3d5_pr"
+                  },
+                  {
+                    "fieldName": "pr",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d151a2487fe51ac866da4cb_pr"
+                  },
+                  {
+                    "fieldName": "pr",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21e701cb6974bab1bedb330f3_pr"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "t_materials",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_pr_materials",
+                  "fields": [
+                    {
+                      "name": "pr_item",
+                      "expression": "`pr_item`"
+                    },
+                    {
+                      "name": "material",
+                      "expression": "`material`"
+                    },
+                    {
+                      "name": "material_name",
+                      "expression": "`material_name`"
+                    },
+                    {
+                      "name": "pack_category",
+                      "expression": "`pack_category`"
+                    },
+                    {
+                      "name": "plant",
+                      "expression": "`plant`"
+                    },
+                    {
+                      "name": "qty",
+                      "expression": "`qty`"
+                    },
+                    {
+                      "name": "uom",
+                      "expression": "`uom`"
+                    },
+                    {
+                      "name": "pr_status",
+                      "expression": "`pr_status`"
+                    },
+                    {
+                      "name": "source_type",
+                      "expression": "`source_type`"
+                    },
+                    {
+                      "name": "approved_vendors",
+                      "expression": "`approved_vendors`"
+                    },
+                    {
+                      "name": "qualified_vendors",
+                      "expression": "`qualified_vendors`"
+                    },
+                    {
+                      "name": "vendors_with_spec",
+                      "expression": "`vendors_with_spec`"
+                    },
+                    {
+                      "name": "exceptions",
+                      "expression": "`exceptions`"
+                    },
+                    {
+                      "name": "buyer",
+                      "expression": "`buyer`"
+                    },
+                    {
+                      "name": "tat_status",
+                      "expression": "`tat_status`"
+                    },
+                    {
+                      "name": "tat_elapsed_days",
+                      "expression": "`tat_elapsed_days`"
+                    },
+                    {
+                      "name": "tat_remaining_days",
+                      "expression": "`tat_remaining_days`"
+                    },
+                    {
+                      "name": "action_status",
+                      "expression": "`action_status`"
+                    },
+                    {
+                      "name": "exception_reasons",
+                      "expression": "`exception_reasons`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Materials on the selected PR",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "pr_item"
+                  },
+                  {
+                    "fieldName": "material"
+                  },
+                  {
+                    "fieldName": "material_name"
+                  },
+                  {
+                    "fieldName": "pack_category"
+                  },
+                  {
+                    "fieldName": "plant"
+                  },
+                  {
+                    "fieldName": "qty"
+                  },
+                  {
+                    "fieldName": "uom"
+                  },
+                  {
+                    "fieldName": "pr_status"
+                  },
+                  {
+                    "fieldName": "buyer"
+                  },
+                  {
+                    "fieldName": "tat_status",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Missed"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#C8372D",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Risk"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#E0A100",
+                          "foregroundColor": "#333333"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Within"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#2E8B57",
+                          "foregroundColor": "#FFFFFF"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "tat_elapsed_days"
+                  },
+                  {
+                    "fieldName": "tat_remaining_days"
+                  },
+                  {
+                    "fieldName": "action_status",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "No Exception"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#2E8B57",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Has Exceptions"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#C8372D",
+                          "foregroundColor": "#FFFFFF"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "exception_reasons"
+                  },
+                  {
+                    "fieldName": "source_type"
+                  },
+                  {
+                    "fieldName": "approved_vendors"
+                  },
+                  {
+                    "fieldName": "qualified_vendors"
+                  },
+                  {
+                    "fieldName": "vendors_with_spec"
+                  },
+                  {
+                    "fieldName": "exceptions"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 9
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "vendors_specs",
+      "displayName": "Vendors and specs",
+      "layout": [
+        {
+          "widget": {
+            "name": "band",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "style": {
+                "fontColor": {
+                  "light": "#FFFFFF",
+                  "dark": "#FFFFFF"
+                }
+              },
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "<span style=\"text-align:center;display:block\"><span style=\"font-size:14px\">**Vendors and specifications**</span></span>"
+                  ],
+                  "fields": []
+                }
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              },
+              "widgetBorderColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "f_material",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e7fc3f13099ac5eace9352f948_material_name",
+                "query": {
+                  "datasetName": "ds_pr_materials",
+                  "fields": [
+                    {
+                      "name": "material_name",
+                      "expression": "`material_name`"
+                    },
+                    {
+                      "name": "material_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1ddc5bf9e11379d8b108a6233b3d5_material_name",
+                "query": {
+                  "datasetName": "ds_material_vendors",
+                  "fields": [
+                    {
+                      "name": "material_name",
+                      "expression": "`material_name`"
+                    },
+                    {
+                      "name": "material_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d151a2487fe51ac866da4cb_material_name",
+                "query": {
+                  "datasetName": "ds_vendor_spec",
+                  "fields": [
+                    {
+                      "name": "material_name",
+                      "expression": "`material_name`"
+                    },
+                    {
+                      "name": "material_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1dcec701d1e21991c23e65c61639f_material_name",
+                "query": {
+                  "datasetName": "ds_spec_slots",
+                  "fields": [
+                    {
+                      "name": "material_name",
+                      "expression": "`material_name`"
+                    },
+                    {
+                      "name": "material_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Select material"
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "material_name",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e7fc3f13099ac5eace9352f948_material_name"
+                  },
+                  {
+                    "fieldName": "material_name",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1ddc5bf9e11379d8b108a6233b3d5_material_name"
+                  },
+                  {
+                    "fieldName": "material_name",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d151a2487fe51ac866da4cb_material_name"
+                  },
+                  {
+                    "fieldName": "material_name",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1dcec701d1e21991c23e65c61639f_material_name"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "f_vendors",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1ddc5bf9e11379d8b108a6233b3d5_manufacturer_name",
+                "query": {
+                  "datasetName": "ds_material_vendors",
+                  "fields": [
+                    {
+                      "name": "manufacturer_name",
+                      "expression": "`manufacturer_name`"
+                    },
+                    {
+                      "name": "manufacturer_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1dcec701d1e21991c23e65c61639f_manufacturer_name",
+                "query": {
+                  "datasetName": "ds_spec_slots",
+                  "fields": [
+                    {
+                      "name": "manufacturer_name",
+                      "expression": "`manufacturer_name`"
+                    },
+                    {
+                      "name": "manufacturer_name_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Compare vendors"
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "manufacturer_name",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1ddc5bf9e11379d8b108a6233b3d5_manufacturer_name"
+                  },
+                  {
+                    "fieldName": "manufacturer_name",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1dcec701d1e21991c23e65c61639f_manufacturer_name"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 1,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "t_vendors",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_material_vendors",
+                  "fields": [
+                    {
+                      "name": "vendor_role",
+                      "expression": "`vendor_role`"
+                    },
+                    {
+                      "name": "manufacturer_name",
+                      "expression": "`manufacturer_name`"
+                    },
+                    {
+                      "name": "supplier_name",
+                      "expression": "`supplier_name`"
+                    },
+                    {
+                      "name": "last_po_date",
+                      "expression": "`last_po_date`"
+                    },
+                    {
+                      "name": "po_count",
+                      "expression": "`po_count`"
+                    },
+                    {
+                      "name": "qual_status",
+                      "expression": "`qual_status`"
+                    },
+                    {
+                      "name": "qual_due",
+                      "expression": "`qual_due`"
+                    },
+                    {
+                      "name": "has_spec",
+                      "expression": "`has_spec`"
+                    },
+                    {
+                      "name": "specification_no",
+                      "expression": "`specification_no`"
+                    },
+                    {
+                      "name": "edition_no",
+                      "expression": "`edition_no`"
+                    },
+                    {
+                      "name": "spec_effective_date",
+                      "expression": "`spec_effective_date`"
+                    },
+                    {
+                      "name": "price_text",
+                      "expression": "`price_text`"
+                    },
+                    {
+                      "name": "price_validity",
+                      "expression": "`price_validity`"
+                    },
+                    {
+                      "name": "price_valid_from",
+                      "expression": "`price_valid_from`"
+                    },
+                    {
+                      "name": "price_valid_to",
+                      "expression": "`price_valid_to`"
+                    },
+                    {
+                      "name": "lead_time_days",
+                      "expression": "`lead_time_days`"
+                    },
+                    {
+                      "name": "standard_po_qty",
+                      "expression": "`standard_po_qty`"
+                    },
+                    {
+                      "name": "source_list",
+                      "expression": "`source_list`"
+                    },
+                    {
+                      "name": "manufacturer_country",
+                      "expression": "`manufacturer_country`"
+                    },
+                    {
+                      "name": "storage_condition",
+                      "expression": "`storage_condition`"
+                    },
+                    {
+                      "name": "last_po_number",
+                      "expression": "`last_po_number`"
+                    },
+                    {
+                      "name": "last_po_qty",
+                      "expression": "`last_po_qty`"
+                    },
+                    {
+                      "name": "last_po_unit",
+                      "expression": "`last_po_unit`"
+                    },
+                    {
+                      "name": "last_po_delivery_date",
+                      "expression": "`last_po_delivery_date`"
+                    },
+                    {
+                      "name": "last_po_created_by",
+                      "expression": "`last_po_created_by`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Vendors for the selected material (price terms shown for vendors we have purchased from)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "vendor_role"
+                  },
+                  {
+                    "fieldName": "manufacturer_name"
+                  },
+                  {
+                    "fieldName": "supplier_name"
+                  },
+                  {
+                    "fieldName": "last_po_date"
+                  },
+                  {
+                    "fieldName": "po_count"
+                  },
+                  {
+                    "fieldName": "price_text",
+                    "displayName": "Last agreed price"
+                  },
+                  {
+                    "fieldName": "price_validity",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Valid today"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#2E8B57",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Expired"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#C8372D",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Not yet valid"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#E0A100",
+                          "foregroundColor": "#333333"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Validity unknown"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#6B7A90",
+                          "foregroundColor": "#FFFFFF"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "price_valid_from"
+                  },
+                  {
+                    "fieldName": "price_valid_to"
+                  },
+                  {
+                    "fieldName": "lead_time_days"
+                  },
+                  {
+                    "fieldName": "standard_po_qty"
+                  },
+                  {
+                    "fieldName": "source_list"
+                  },
+                  {
+                    "fieldName": "manufacturer_country"
+                  },
+                  {
+                    "fieldName": "storage_condition"
+                  },
+                  {
+                    "fieldName": "last_po_number"
+                  },
+                  {
+                    "fieldName": "last_po_qty"
+                  },
+                  {
+                    "fieldName": "last_po_unit"
+                  },
+                  {
+                    "fieldName": "last_po_delivery_date"
+                  },
+                  {
+                    "fieldName": "last_po_created_by"
+                  },
+                  {
+                    "fieldName": "qual_status",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "VALID"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#2E8B57",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "EXPIRING"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#E0A100",
+                          "foregroundColor": "#333333"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "EXPIRED"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#C8372D",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "INELIGIBLE"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#4A5563",
+                          "foregroundColor": "#FFFFFF"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "qual_due"
+                  },
+                  {
+                    "fieldName": "has_spec"
+                  },
+                  {
+                    "fieldName": "specification_no"
+                  },
+                  {
+                    "fieldName": "edition_no"
+                  },
+                  {
+                    "fieldName": "spec_effective_date"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "pv_spec",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_spec_slots",
+                  "fields": [
+                    {
+                      "name": "material_name",
+                      "expression": "`material_name`"
+                    },
+                    {
+                      "name": "parameter_label",
+                      "expression": "`parameter_label`"
+                    },
+                    {
+                      "name": "vendor_slot",
+                      "expression": "`vendor_slot`"
+                    },
+                    {
+                      "name": "first(spec_text)",
+                      "expression": "FIRST(`spec_text`)"
+                    }
+                  ],
+                  "cubeGroupingSets": {
+                    "sets": [
+                      {
+                        "fieldNames": [
+                          "material_name",
+                          "parameter_label"
+                        ]
+                      },
+                      {
+                        "fieldNames": [
+                          "vendor_slot"
+                        ]
+                      }
+                    ]
+                  },
+                  "disaggregated": false,
+                  "orders": [
+                    {
+                      "direction": "ASC",
+                      "expression": "`material_name`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`parameter_label`"
+                    },
+                    {
+                      "direction": "ASC",
+                      "expression": "`vendor_slot`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Specification values as written",
+                  "fields": []
+                }
+              },
+              "version": 4,
+              "widgetType": "pivot",
+              "encodings": {
+                "rows": {
+                  "fields": [
+                    {
+                      "fieldName": "material_name",
+                      "headerWidth": 220,
+                      "displayName": "Material",
+                      "total": {
+                        "show": false
+                      },
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    },
+                    {
+                      "fieldName": "parameter_label",
+                      "headerWidth": 240,
+                      "displayName": "Parameter",
+                      "total": {
+                        "show": false
+                      },
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    }
+                  ]
+                },
+                "columns": {
+                  "fields": [
+                    {
+                      "fieldName": "vendor_slot",
+                      "displayName": "Vendor",
+                      "total": {
+                        "show": false
+                      },
+                      "scale": {
+                        "type": "categorical"
+                      }
+                    }
+                  ]
+                },
+                "cells": {
+                  "fields": [
+                    {
+                      "fieldName": "first(spec_text)",
+                      "displayName": "Specification",
+                      "actions": {
+                        "hover": {
+                          "type": "tooltip",
+                          "tooltipTemplate": "{{ @ }}"
+                        }
+                      },
+                      "cellType": "text"
+                    }
+                  ],
+                  "width": 280,
+                  "displayAs": "rows"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 11
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "exceptions",
+      "displayName": "Exceptions and coverage",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "style": {
+                "fontColor": {
+                  "light": "#FFFFFF",
+                  "dark": "#FFFFFF"
+                }
+              },
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "<span style=\"text-align:center;display:block\"><span style=\"font-size: 14px;\">**Exceptions and coverage**</span></span>"
+                  ],
+                  "fields": []
+                }
+              }
+            },
+            "specExtensions": {
+              "widgetBackgroundColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              },
+              "widgetBorderColor": {
+                "light": "#043B5C",
+                "dark": "#043B5C"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "tiles_exc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_exceptions_detail",
+                  "fields": [
+                    {
+                      "name": "exception",
+                      "expression": "`exception`"
+                    },
+                    {
+                      "name": "pr_lines",
+                      "expression": "COUNT(DISTINCT `pr_line`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "PR lines by exception",
+                  "fields": []
+                }
+              },
+              "version": 1,
+              "jsonSpec": {
+                "type": "vega-lite",
+                "spec": "{\"$schema\":\"https://vega.github.io/schema/vega-lite/v6.json\",\"data\":{\"name\":\"databricks_query\"},\"width\":\"container\",\"height\":\"container\",\"config\":{\"autosize\":{\"type\":\"fit\",\"contains\":\"padding\"},\"view\":{\"stroke\":null}},\"encoding\":{\"x\":{\"field\":\"exception\",\"type\":\"nominal\",\"axis\":null,\"sort\":\"ascending\",\"scale\":{\"paddingInner\":0.06}}},\"layer\":[{\"mark\":{\"type\":\"bar\",\"cornerRadius\":6},\"encoding\":{\"color\":{\"field\":\"exception\",\"type\":\"nominal\",\"sort\":\"ascending\",\"scale\":{\"range\":[\"#043B5C\",\"#066A98\",\"#388CB8\",\"#5FA8C9\",\"#6B7A90\"]},\"legend\":null},\"tooltip\":[{\"field\":\"exception\",\"title\":\"Exception\"},{\"field\":\"pr_lines\",\"title\":\"PR lines\"}]}},{\"mark\":{\"type\":\"text\",\"dy\":-10,\"fontSize\":28,\"fontWeight\":\"bold\",\"color\":\"#FFFFFF\"},\"encoding\":{\"text\":{\"field\":\"pr_lines\",\"type\":\"quantitative\"}}},{\"mark\":{\"type\":\"text\",\"dy\":20,\"fontSize\":10,\"color\":\"#FFFFFF\",\"limit\":125},\"encoding\":{\"text\":{\"field\":\"exception\",\"type\":\"nominal\"}}}]}"
+              },
+              "widgetType": "custom-vega-viz",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "exception"
+                  },
+                  {
+                    "fieldName": "pr_lines"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "f_exc_type",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21e701cb6974bab1bedb330f3_exception",
+                "query": {
+                  "datasetName": "ds_exceptions_detail",
+                  "fields": [
+                    {
+                      "name": "exception",
+                      "expression": "`exception`"
+                    },
+                    {
+                      "name": "exception_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Exception type"
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "exception",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21e701cb6974bab1bedb330f3_exception"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "t_exc_lines",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_exceptions_detail",
+                  "fields": [
+                    {
+                      "name": "pr",
+                      "expression": "`pr`"
+                    },
+                    {
+                      "name": "pr_line",
+                      "expression": "`pr_line`"
+                    },
+                    {
+                      "name": "material",
+                      "expression": "`material`"
+                    },
+                    {
+                      "name": "material_name",
+                      "expression": "`material_name`"
+                    },
+                    {
+                      "name": "plant",
+                      "expression": "`plant`"
+                    },
+                    {
+                      "name": "pr_date",
+                      "expression": "`pr_date`"
+                    },
+                    {
+                      "name": "exception",
+                      "expression": "`exception`"
+                    },
+                    {
+                      "name": "reason",
+                      "expression": "`reason`"
+                    },
+                    {
+                      "name": "buyer",
+                      "expression": "`buyer`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "PR lines with exceptions"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "pr"
+                  },
+                  {
+                    "fieldName": "pr_line"
+                  },
+                  {
+                    "fieldName": "material"
+                  },
+                  {
+                    "fieldName": "material_name"
+                  },
+                  {
+                    "fieldName": "plant"
+                  },
+                  {
+                    "fieldName": "buyer"
+                  },
+                  {
+                    "fieldName": "pr_date"
+                  },
+                  {
+                    "fieldName": "exception"
+                  },
+                  {
+                    "fieldName": "reason"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 9
+          }
+        },
+        {
+          "widget": {
+            "name": "f_pr_exc",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_pr",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "fields": [
+                    {
+                      "name": "pr",
+                      "expression": "`pr`"
+                    },
+                    {
+                      "name": "pr_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21e701cb6974bab1bedb330f3_pr",
+                "query": {
+                  "datasetName": "ds_exceptions_detail",
+                  "fields": [
+                    {
+                      "name": "pr",
+                      "expression": "`pr`"
+                    },
+                    {
+                      "name": "pr_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "PR"
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "pr",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21d6a129bbbd733fd6ea1d8a2_pr"
+                  },
+                  {
+                    "fieldName": "pr",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1d9e21e701cb6974bab1bedb330f3_pr"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {
+        "light": "#F3F7FA",
+        "dark": "#0B1620"
+      },
+      "widgetBackgroundColor": {
+        "light": "#FFFFFF",
+        "dark": "#13212D"
+      },
+      "widgetBorderColor": {
+        "light": "#DCE6EC",
+        "dark": "#22323F"
+      },
+      "selectionColor": {
+        "light": "#005393",
+        "dark": "#388CB8"
+      },
+      "visualizationColors": [
+        "#066A98",
+        "#2A9D8F",
+        "#7B6CB8",
+        "#C98A2B",
+        "#388CB8",
+        "#6B7A90"
+      ],
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED",
+      "widgetPadding": 16,
+      "widgetMargin": 8,
+      "widgetCornerRadius": 8,
+      "widgetShadow": 10,
+      "fontSettings": {
+        "base": {
+          "fontFamily": "Roboto",
+          "fontColor": {
+            "light": "#333333",
+            "dark": "#E6EAEE"
+          }
+        },
+        "widgetTitle": {
+          "fontFamily": "Roboto",
+          "fontColor": {
+            "light": "#333333",
+            "dark": "#E6EAEE"
+          },
+          "fontSize": 15,
+          "fontWeight": 600
+        },
+        "widgetDescription": {
+          "fontColor": {
+            "light": "#6B7480",
+            "dark": "#A8B1BD"
+          }
+        },
+        "fieldTitle": {
+          "fontColor": {
+            "light": "#333333",
+            "dark": "#E6EAEE"
+          },
+          "fontWeight": 600
+        },
+        "fieldValue": {
+          "fontColor": {
+            "light": "#6B7480",
+            "dark": "#A8B1BD"
+          }
+        }
+      },
+      "gridLineColor": {
+        "light": "#DCE6EC",
+        "dark": "#22323F"
+      },
+      "visualizationColorMappings": [
+        {
+          "value": "Open",
+          "color": "#066A98"
+        },
+        {
+          "value": "Partially Ordered",
+          "color": "#388CB8"
+        },
+        {
+          "value": "Multi Source",
+          "color": "#2A9D8F"
+        },
+        {
+          "value": "Single Source",
+          "color": "#E0A100"
+        },
+        {
+          "value": "No Qualified Vendor",
+          "color": "#C8372D"
+        },
+        {
+          "value": "No AVL Vendor",
+          "color": "#4A5563"
+        },
+        {
+          "value": "Primary",
+          "color": "#066A98"
+        },
+        {
+          "value": "Secondary",
+          "color": "#2A9D8F"
+        },
+        {
+          "value": "Tertiary",
+          "color": "#7B6CB8"
+        },
+        {
+          "value": "CURRENT",
+          "color": "#066A98"
+        },
+        {
+          "value": "HISTORICAL",
+          "color": "#6B7A90"
+        },
+        {
+          "value": "ALTERNATIVE_UNUSED",
+          "color": "#8FB8DE"
+        },
+        {
+          "value": "VALID",
+          "color": "#2E8B57"
+        },
+        {
+          "value": "EXPIRING",
+          "color": "#E0A100"
+        },
+        {
+          "value": "EXPIRED",
+          "color": "#C8372D"
+        },
+        {
+          "value": "INELIGIBLE",
+          "color": "#4A5563"
+        },
+        {
+          "value": "UNKNOWN",
+          "color": "#A8B1BD"
+        },
+        {
+          "value": "All vendors have a spec",
+          "color": "#066A98"
+        },
+        {
+          "value": "Some vendors have a spec",
+          "color": "#388CB8"
+        },
+        {
+          "value": "No vendor has a spec",
+          "color": "#6B7A90"
+        },
+        {
+          "value": "No approved vendor",
+          "color": "#A8B1BD"
+        },
+        {
+          "value": "Missed",
+          "color": "#C8372D"
+        },
+        {
+          "value": "Risk",
+          "color": "#E0A100"
+        },
+        {
+          "value": "Within",
+          "color": "#2E8B57"
+        },
+        {
+          "value": "No Exception",
+          "color": "#2E8B57"
+        },
+        {
+          "value": "Has Exceptions",
+          "color": "#C8372D"
+        },
+        {
+          "value": "HISTORICAL_NOT_QUALIFIED",
+          "color": "#8A94A3"
+        }
+      ]
+    },
+    "applyModeEnabled": false
+  }
+}

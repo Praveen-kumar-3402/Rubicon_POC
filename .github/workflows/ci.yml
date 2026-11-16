@@ -1,0 +1,27 @@
+name: CI (pull request -> DEV)
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-and-test-in-dev:
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      BUNDLE_VAR_warehouse_id: ${{ vars.WAREHOUSE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Syntax check notebooks
+        run: python -m py_compile notebooks/*.py
+      - uses: databricks/setup-cli@main
+      - name: Validate bundle
+        run: databricks bundle validate -t dev
+      - name: Deploy to DEV
+        run: databricks bundle deploy -t dev
+      - name: Run pipeline + checks in DEV (rubicon_dev)
+        run: databricks bundle run vendor_discovery_pipeline -t dev

@@ -1,0 +1,33 @@
+bundle:
+  name: rubicon-vendor-discovery
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Target catalog for this environment
+  source_catalog:
+    description: Catalog holding the raw landing Volume and the samwed spec tables (shared by all environments in this PoC)
+    default: rubicon_poc_workspace
+  warehouse_id:
+    description: SQL warehouse that serves the dashboard
+
+# The workspace host and credentials come from the environment (DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET)
+# or from `databricks auth login --host <url>` when you run it on your own machine.
+targets:
+  dev:
+    default: true
+    variables: { catalog: rubicon_dev }
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/dev
+
+  qa:
+    variables: { catalog: rubicon_qa }
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/qa
+
+  prod:
+    variables: { catalog: rubicon_prod }
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/prod
