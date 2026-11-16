@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Rubicon vendor discovery - CI/CD demo (GitHub + Databricks Asset Bundles)
 
 One workspace, three environments, each its own Unity Catalog catalog:
@@ -45,3 +46,6 @@ databricks bundle run vendor_discovery_pipeline -t dev
 - Notebooks are Databricks source-format `.py` files, generated from the current Bronze / Silver / Gold notebooks with the catalog turned into the `catalog` parameter, plus the exception-based `action_status` change.
 - The dashboard copy in `dashboards/` has its table names without a catalog; the bundle sets the catalog per environment.
 - Not yet run end-to-end: the first DEV run may surface small fixes.
+=======
+# Rubicon_POC
+>>>>>>> 7df0eef827cf3242cf8829fa95e9f6450d083cdd
