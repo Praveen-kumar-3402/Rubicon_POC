@@ -9,6 +9,7 @@ jobs:
     environment: qa
     env:
       DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_AUTH_TYPE: oauth-m2m
       DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
       DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
       BUNDLE_VAR_warehouse_id: ${{ vars.WAREHOUSE_ID }}
@@ -25,6 +26,7 @@ jobs:
     environment: prod        # add "Required reviewers" on this environment = manual approval gate
     env:
       DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_AUTH_TYPE: oauth-m2m
       DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
       DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
       BUNDLE_VAR_warehouse_id: ${{ vars.WAREHOUSE_ID }}
