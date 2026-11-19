@@ -3,6 +3,7 @@ name: CI (pull request checks)
 on:
   pull_request:
     branches: [development, main]
+    types: [opened, synchronize, reopened, edited]   # "edited" also fires when the base branch is changed
 
 jobs:
   validate:
