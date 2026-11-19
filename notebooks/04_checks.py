@@ -34,7 +34,8 @@ check("TAT status is Missed / Risk / Within", q(f"""SELECT COUNT(*) FROM {CATALO
 check("every PR is under at least one exception status", q(f"""SELECT COUNT(*) FROM {CATALOG}.gold.v_pr_list
     WHERE NOT (has_no_exception_line OR has_exception_line)""") == 0)
 check("PR flags match its lines", q(f"""SELECT COUNT(*) FROM {CATALOG}.gold.v_pr_list l
-    WHERE has_exception_line <> EXISTS (SELECT 1 FROM {CATALOG}.gold.v_pr_summary s WHERE s.pr = l.pr AND s.action_status = 'Has_Exceptions')""") == 0)
+    LEFT JOIN (SELECT pr, MAX(action_status = 'Has_Exceptions') AS h FROM {CATALOG}.gold.v_pr_summary GROUP BY pr) s ON s.pr = l.pr
+    WHERE l.has_exception_line <> COALESCE(s.h, false)""") == 0)
 
 # 4. the pipeline recorded itself and nothing failed
 check("no Failed rows in pipeline_metadata", q(f"SELECT COUNT(*) FROM {CATALOG}.metadata.pipeline_metadata WHERE last_run_status = 'Failed'") == 0)
