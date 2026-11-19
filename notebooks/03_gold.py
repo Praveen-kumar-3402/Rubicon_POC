@@ -271,7 +271,11 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC        e.exception_list,
 # MAGIC        COALESCE(e.exception_count, 0)    AS exception_count,
 # MAGIC        CASE WHEN COALESCE(e.exception_count, 0) = 0 THEN 'No_Exception' ELSE 'Has_Exceptions' END AS action_status,
-# MAGIC        e.exception_reasons
+# MAGIC        e.exception_reasons,
+# MAGIC        -- kept because the dashboard reads them (line-level flag; reason text based on vendors / specs)
+# MAGIC        CASE WHEN COALESCE(e.exception_count, 0) > 0 THEN 'Has exceptions' ELSE 'No exceptions' END AS line_exception_flag,
+# MAGIC        CASE WHEN COALESCE(v.approved_vendors, 0) = 0 THEN 'No approved vendor in the AVL for this material'
+# MAGIC             WHEN COALESCE(v.vendors_with_spec, 0) = 0 THEN 'No approved vendor has a specification on file' END AS non_action_reason
 # MAGIC FROM silver.dim_pr_open_pkg p
 # MAGIC LEFT JOIN v ON v.pr_line = p.pr_line
 # MAGIC LEFT JOIN e ON e.pr_line = p.pr_line
@@ -312,9 +316,13 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC        SUM(CASE WHEN s.exception_count > 0 THEN 1 ELSE 0 END)     AS lines_with_exceptions,
 # MAGIC        array_join(array_sort(array_distinct(flatten(collect_list(s.exception_list)))), ', ') AS exceptions,
 # MAGIC        CASE WHEN SUM(s.exception_count) > 0 THEN 'Has exceptions' ELSE 'No exceptions' END AS exception_flag,
+# MAGIC        SUM(CASE WHEN s.line_exception_flag = 'No exceptions' THEN 1 ELSE 0 END) AS lines_without_exceptions,   -- read by the dashboard
 # MAGIC        SUM(CASE WHEN s.action_status = 'No_Exception' THEN 1 ELSE 0 END)     AS action_lines,
 # MAGIC        SUM(CASE WHEN s.action_status = 'Has_Exceptions' THEN 1 ELSE 0 END) AS non_action_lines,
-# MAGIC        CASE WHEN SUM(CASE WHEN s.action_status = 'Has_Exceptions' THEN 1 ELSE 0 END) = 0 THEN 'No_Exception' ELSE 'Has_Exceptions' END AS action_status
+# MAGIC        CASE WHEN SUM(CASE WHEN s.action_status = 'Has_Exceptions' THEN 1 ELSE 0 END) = 0 THEN 'No_Exception' ELSE 'Has_Exceptions' END AS action_status,
+# MAGIC        -- A PR can move forward if at least one line has no exception, and it needs attention if at least one line has exceptions: a mixed PR is both.
+# MAGIC        SUM(CASE WHEN s.action_status = 'No_Exception'   THEN 1 ELSE 0 END) > 0 AS has_no_exception_line,
+# MAGIC        SUM(CASE WHEN s.action_status = 'Has_Exceptions' THEN 1 ELSE 0 END) > 0 AS has_exception_line
 # MAGIC FROM gold.v_pr_summary s
 # MAGIC GROUP BY s.pr;
 
@@ -324,15 +332,15 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC -- v_buyer_summary : one row per buyer (PR creator). Entry point for the buyer -> PRs -> materials storyline.
 # MAGIC CREATE OR REPLACE VIEW gold.v_buyer_summary AS
 # MAGIC WITH pr AS (
-# MAGIC   SELECT s.buyer, s.pr, l.priority, l.action_status, l.pr_date
+# MAGIC   SELECT s.buyer, s.pr, l.priority, l.action_status, l.has_no_exception_line, l.has_exception_line, l.pr_date
 # MAGIC   FROM (SELECT DISTINCT buyer, pr FROM gold.v_pr_summary) s JOIN gold.v_pr_list l ON l.pr = s.pr
 # MAGIC ),
 # MAGIC prc AS (
 # MAGIC   SELECT buyer, COUNT(DISTINCT pr) AS prs,
 # MAGIC          COUNT(DISTINCT CASE WHEN priority = 'NEW' THEN pr END)             AS new_prs,
 # MAGIC          COUNT(DISTINCT CASE WHEN priority = 'BACKLOG' THEN pr END)         AS backlog_prs,
-# MAGIC          COUNT(DISTINCT CASE WHEN action_status = 'No_Exception' THEN pr END)     AS action_prs,
-# MAGIC          COUNT(DISTINCT CASE WHEN action_status = 'Has_Exceptions' THEN pr END) AS non_action_prs,
+# MAGIC          COUNT(DISTINCT CASE WHEN has_no_exception_line THEN pr END) AS action_prs,
+# MAGIC          COUNT(DISTINCT CASE WHEN has_exception_line    THEN pr END) AS non_action_prs,
 # MAGIC          MIN(pr_date) AS oldest_pr_date
 # MAGIC   FROM pr GROUP BY buyer
 # MAGIC ),

@@ -1,10 +1,12 @@
 name: CD (merge to main -> QA -> PROD)
+# main only receives merged pull requests from the development branch.
 on:
   push:
     branches: [main]
 
 jobs:
   qa:
+    concurrency: { group: deploy-qa, cancel-in-progress: false }
     runs-on: ubuntu-latest
     environment: qa
     env:
@@ -22,6 +24,7 @@ jobs:
 
   prod:
     needs: qa
+    concurrency: { group: deploy-prod, cancel-in-progress: false }
     runs-on: ubuntu-latest
     environment: prod        # add "Required reviewers" on this environment = manual approval gate
     env:

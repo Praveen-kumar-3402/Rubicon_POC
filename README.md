@@ -4,14 +4,17 @@ One workspace, three environments, each its own Unity Catalog catalog:
 
 | Environment | Catalog | Deployed by |
 |---|---|---|
-| DEV  | `rubicon_dev`  | every pull request (CI) |
-| QA   | `rubicon_qa`   | merge to `main` (CD, automatic) |
+| DEV  | `rubicon_dev`  | merge into `development` |
+| QA   | `rubicon_qa`   | merge into `main` (automatic) |
 | PROD | `rubicon_prod` | after QA passes **and** a reviewer approves (CD) |
 
 ```
-developer branch -> pull request -> CI: syntax check, bundle validate, deploy to DEV, run pipeline + checks
-                 -> merge to main -> CD: deploy + run in QA -> approval -> deploy + run in PROD
+feature/* or release/*  --PR-->  development  (CI: syntax + bundle validate)
+        merge  -> CD DEV: deploy + run in rubicon_dev   (/Workspace/Shared/.bundle/rubicon-vendor-discovery/dev)
+development  --PR-->  main        (CI: only development may be merged into main)
+        merge  -> CD: deploy + run in rubicon_qa, then (after reviewer approval) rubicon_prod
 ```
+Nothing is deployed from a pull request; deployment happens when the PR is merged.
 The pipeline is one job per environment: `00_setup` -> `01_bronze` -> `02_silver` -> `03_gold` -> `04_checks`.
 A failed check fails the job, so a bad change never reaches the next environment. The same code runs everywhere; only the `catalog` parameter differs.
 
