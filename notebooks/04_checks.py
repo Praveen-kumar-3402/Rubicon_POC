@@ -37,6 +37,11 @@ check("PR flags match its lines", q(f"""SELECT COUNT(*) FROM {CATALOG}.gold.v_pr
     LEFT JOIN (SELECT pr, MAX(action_status = 'Has_Exceptions') AS h FROM {CATALOG}.gold.v_pr_summary GROUP BY pr) s ON s.pr = l.pr
     WHERE l.has_exception_line <> COALESCE(s.h, false)""") == 0)
 
+check("has_spec lines carry a specification and a match type", q(f"""SELECT COUNT(*) FROM {CATALOG}.gold.v_vendor_options
+    WHERE has_spec AND (specification_no IS NULL OR spec_match NOT IN ('MPN','MATERIAL_CODE'))""") == 0)
+check("a vendor without a spec has no match type", q(f"""SELECT COUNT(*) FROM {CATALOG}.gold.v_vendor_options
+    WHERE NOT has_spec AND spec_match IS NOT NULL""") == 0)
+
 # 4. the pipeline recorded itself and nothing failed
 check("no Failed rows in pipeline_metadata", q(f"SELECT COUNT(*) FROM {CATALOG}.metadata.pipeline_metadata WHERE last_run_status = 'Failed'") == 0)
 

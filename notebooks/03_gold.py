@@ -32,7 +32,19 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC -- last_used_rank = 1 marks the most recently used vendor (the baseline for spec comparison).
 # MAGIC -- source_type has four explicit values. Spec header columns come from the vendor's latest specification.
 # MAGIC CREATE OR REPLACE VIEW v_vendor_options AS
-# MAGIC WITH vp AS (   -- last agreed price per PR line x MPN x supplier: a record WITH a price first, then the PR plant, then the latest Valid From
+# MAGIC WITH avl AS (   -- AVL may repeat a vendor, but not a row: identical rows are merged; rows that differ only by qualification due date keep the LATEST (client rule)
+# MAGIC   SELECT item_code, mpn, manufacturer_name, supplier_code, supplier_name, manufacturer_country, storage_condition,
+# MAGIC          po_count, last_po_date, last_po_number, last_po_qty, last_po_unit, last_po_created_by, last_po_created_on, last_po_delivery_date,
+# MAGIC          qual_due, COALESCE(qual_due > DATE'2050-01-01', FALSE) AS date_suspect
+# MAGIC   FROM (
+# MAGIC     SELECT item_code, mpn, manufacturer_name, supplier_code, supplier_name, manufacturer_country, storage_condition,
+# MAGIC            po_count, last_po_date, last_po_number, last_po_qty, last_po_unit, last_po_created_by, last_po_created_on, last_po_delivery_date,
+# MAGIC            COALESCE(MAX(CASE WHEN NOT date_suspect THEN qual_due END), MAX(qual_due)) AS qual_due   -- impossible dates (year > 2050) only if nothing else
+# MAGIC     FROM silver.dim_avl_vendor
+# MAGIC     GROUP BY item_code, mpn, manufacturer_name, supplier_code, supplier_name, manufacturer_country, storage_condition,
+# MAGIC              po_count, last_po_date, last_po_number, last_po_qty, last_po_unit, last_po_created_by, last_po_created_on, last_po_delivery_date)
+# MAGIC ),
+# MAGIC vp AS (   -- last agreed price per PR line x MPN x supplier: a record WITH a price first, then the PR plant, then the latest Valid From
 # MAGIC   SELECT * FROM (
 # MAGIC     SELECT p.pr_line, v.mpn, v.supplier_code, v.net_price, v.currency, v.price_unit, v.order_price_unit, v.price_per_unit,
 # MAGIC            v.valid_from, v.valid_to, v.lead_time_days, v.standard_po_qty, v.over_delivery_tolerance_pct, v.source_list,
@@ -74,12 +86,22 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC            WHEN a.qual_due <= date_add(current_date(), 90)     THEN 'EXPIRING'
 # MAGIC            ELSE 'VALID'
 # MAGIC          END AS qual_status,
-# MAGIC          d.specification_no, d.edition_no, d.effective_date AS spec_effective_date, d.pdf_manufacturer,
-# MAGIC          COALESCE(d.n_lines > 0, FALSE) AS has_spec
+# MAGIC          COALESCE(d1.specification_no, d2.specification_no) AS specification_no,
+# MAGIC          COALESCE(d1.edition_no, d2.edition_no)             AS edition_no,
+# MAGIC          COALESCE(d1.effective_date, d2.effective_date)     AS spec_effective_date,
+# MAGIC          COALESCE(d1.pdf_manufacturer, d2.pdf_manufacturer) AS pdf_manufacturer,
+# MAGIC          CASE WHEN d1.specification_no IS NOT NULL THEN 'MPN'
+# MAGIC               WHEN d2.specification_no IS NOT NULL THEN 'MATERIAL_CODE' END AS spec_match,
+# MAGIC          COALESCE(COALESCE(d1.n_lines, d2.n_lines) > 0, FALSE) AS has_spec
 # MAGIC   FROM silver.dim_pr_open_pkg p
-# MAGIC   LEFT JOIN silver.dim_avl_vendor a ON a.item_code = p.material
+# MAGIC   LEFT JOIN avl a ON a.item_code = p.material
 # MAGIC   LEFT JOIN vp ON vp.pr_line = p.pr_line AND vp.mpn = a.mpn AND vp.supplier_code <=> a.supplier_code
-# MAGIC   LEFT JOIN silver.dim_spec_doc d   ON d.mpn = a.mpn AND d.is_latest AND d.mpn <> ''
+# MAGIC   -- Specification match (client rule): by MPN first (PDF file name starts with the vendor's MPN);
+# MAGIC   -- only when there is no MPN match, by material code (some PDF file names start with the material code, e.g. 20451_CAR_PLAIN...).
+# MAGIC   -- dim_spec_doc.mpn holds the digits at the start of the file name, whichever of the two it is.
+# MAGIC   LEFT JOIN silver.dim_spec_doc d1  ON d1.mpn = a.mpn AND d1.is_latest AND d1.mpn <> ''
+# MAGIC   LEFT JOIN silver.dim_spec_doc d2  ON d1.specification_no IS NULL AND a.mpn IS NOT NULL
+# MAGIC                                    AND d2.mpn = p.material AND d2.is_latest AND d2.mpn <> ''
 # MAGIC ),
 # MAGIC roled AS (
 # MAGIC   SELECT *,
@@ -122,13 +144,14 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 
 # MAGIC %sql
 # MAGIC CREATE OR REPLACE VIEW gold.v_vendor_spec AS
-# MAGIC WITH vend AS (
+# MAGIC WITH vend AS (   -- the specification (found by MPN, else by material code) is already resolved in v_vendor_options
 # MAGIC   SELECT pr_line, mpn, MAX(material) AS material, MAX(manufacturer_name) AS manufacturer_name,
-# MAGIC          MAX_BY(qual_status, qual_due) AS qual_status
-# MAGIC   FROM gold.v_vendor_options WHERE mpn IS NOT NULL GROUP BY pr_line, mpn
+# MAGIC          MAX_BY(qual_status, qual_due) AS qual_status,
+# MAGIC          MAX(specification_no) AS specification_no, MAX(edition_no) AS edition_no, MAX(spec_match) AS spec_match
+# MAGIC   FROM gold.v_vendor_options WHERE mpn IS NOT NULL AND has_spec GROUP BY pr_line, mpn
 # MAGIC )
 # MAGIC SELECT DISTINCT v.pr_line, v.material, v.mpn, v.manufacturer_name, v.qual_status,
-# MAGIC        d.specification_no, d.edition_no, p.test_seq, p.seg_no, p.parameter, p.component,
+# MAGIC        v.specification_no, v.edition_no, v.spec_match, p.test_seq, p.seg_no, p.parameter, p.component,
 # MAGIC        CONCAT_WS(' ', p.parameter, CASE WHEN p.component IS NULL THEN NULL ELSE CONCAT('(', p.component, ')') END) AS parameter_label,
 # MAGIC        CASE WHEN p.parse_status LIKE 'PARSED_%' THEN 'NUMERIC' ELSE 'TEXT' END AS spec_type,
 # MAGIC        CASE WHEN p.parse_status LIKE 'PARSED_%' THEN
@@ -139,8 +162,7 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC                      ELSE CONCAT(p.spec_min, ' - ', p.spec_max) END, p.unit)
 # MAGIC             ELSE p.spec_line END AS spec_text
 # MAGIC FROM vend v
-# MAGIC JOIN silver.dim_spec_doc d ON d.mpn = v.mpn AND d.is_latest AND d.mpn <> ''
-# MAGIC JOIN silver.dim_spec_test_parsed p ON p.specification_no = d.specification_no AND p.edition_no = d.edition_no
+# MAGIC JOIN silver.dim_spec_test_parsed p ON p.specification_no = v.specification_no AND p.edition_no = v.edition_no
 # MAGIC WHERE p.parse_status NOT IN ('NO_SPEC_TEXT', 'SKIPPED_SUMMARY_ROW') AND p.spec_line IS NOT NULL AND p.parameter IS NOT NULL;
 
 # COMMAND ----------
