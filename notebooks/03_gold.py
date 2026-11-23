@@ -32,7 +32,27 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC -- last_used_rank = 1 marks the most recently used vendor (the baseline for spec comparison).
 # MAGIC -- source_type has four explicit values. Spec header columns come from the vendor's latest specification.
 # MAGIC CREATE OR REPLACE VIEW v_vendor_options AS
-# MAGIC WITH vp AS (   -- last agreed price per PR line x MPN x supplier: a record WITH a price first, then the PR plant, then the latest Valid From
+# MAGIC WITH avl AS (   -- AVL may repeat a vendor, but not a row: identical rows are merged; rows that differ only by qualification due date keep the LATEST (client rule)
+# MAGIC   SELECT item_code, mpn, manufacturer_name, supplier_code, supplier_name, manufacturer_country, storage_condition,
+# MAGIC          po_count, last_po_date, last_po_number, last_po_qty, last_po_unit, last_po_rate, last_po_currency, last_po_created_by, last_po_created_on, last_po_delivery_date,
+# MAGIC          qual_due, COALESCE(qual_due > DATE'2050-01-01', FALSE) AS date_suspect
+# MAGIC   FROM (
+# MAGIC     SELECT item_code, mpn, manufacturer_name, supplier_code, supplier_name, manufacturer_country, storage_condition,
+# MAGIC            po_count, last_po_date, last_po_number, last_po_qty, last_po_unit, last_po_rate, last_po_currency, last_po_created_by, last_po_created_on, last_po_delivery_date,
+# MAGIC            COALESCE(MAX(CASE WHEN NOT date_suspect THEN qual_due END), MAX(qual_due)) AS qual_due   -- impossible dates (year > 2050) only if nothing else
+# MAGIC     FROM silver.dim_avl_vendor
+# MAGIC     GROUP BY item_code, mpn, manufacturer_name, supplier_code, supplier_name, manufacturer_country, storage_condition,
+# MAGIC              po_count, last_po_date, last_po_number, last_po_qty, last_po_unit, last_po_rate, last_po_currency, last_po_created_by, last_po_created_on, last_po_delivery_date)
+# MAGIC ),
+# MAGIC po12 AS (   -- PO rate history of the last 12 months per material + MPN, only POs in the same currency and unit as the last PO (no mixing)
+# MAGIC   SELECT r.material, r.mpn, r.currency, r.uom,
+# MAGIC          SUM(r.po_value) / SUM(r.po_qty) AS rate_12m_avg,   -- quantity-weighted average
+# MAGIC          MIN(r.rate) AS rate_12m_min, MAX(r.rate) AS rate_12m_max, COUNT(*) AS rate_12m_po_count
+# MAGIC   FROM silver.dim_po_rate r
+# MAGIC   WHERE r.document_date >= add_months(current_date(), -12)
+# MAGIC   GROUP BY r.material, r.mpn, r.currency, r.uom
+# MAGIC ),
+# MAGIC vp AS (   -- last agreed price per PR line x MPN x supplier: a record WITH a price first, then the PR plant, then the latest Valid From
 # MAGIC   SELECT * FROM (
 # MAGIC     SELECT p.pr_line, v.mpn, v.supplier_code, v.net_price, v.currency, v.price_unit, v.order_price_unit, v.price_per_unit,
 # MAGIC            v.valid_from, v.valid_to, v.lead_time_days, v.standard_po_qty, v.over_delivery_tolerance_pct, v.source_list,
@@ -64,6 +84,11 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC                      CASE WHEN vp.price_unit <> 1 THEN CONCAT(' (', format_number(vp.price_per_unit, 2), ' per ', vp.order_price_unit, ')') ELSE '' END)
 # MAGIC               END                                         AS price_text,
 # MAGIC          CASE WHEN a.po_count IS NOT NULL THEN vp.lead_time_days END      AS lead_time_days,
+# MAGIC          a.last_po_rate, a.last_po_currency,    -- historical PO rate (PO value / quantity) per last_po_unit, in the PO's own currency
+# MAGIC          h.rate_12m_avg, h.rate_12m_min, h.rate_12m_max, h.rate_12m_po_count,
+# MAGIC          -- last PO rate vs Info Record price: compared only when currency and unit are the same, otherwise NULL
+# MAGIC          CASE WHEN a.po_count IS NOT NULL AND vp.price_per_unit > 0 AND a.last_po_currency = vp.currency AND a.last_po_unit = vp.order_price_unit
+# MAGIC               THEN (a.last_po_rate - vp.price_per_unit) / vp.price_per_unit END AS po_vs_info_record_pct,
 # MAGIC          CASE WHEN a.po_count IS NOT NULL THEN vp.standard_po_qty END     AS standard_po_qty,
 # MAGIC          CASE WHEN a.po_count IS NOT NULL THEN vp.source_list END         AS source_list,
 # MAGIC          CASE WHEN a.po_count IS NOT NULL THEN vp.over_delivery_tolerance_pct END AS over_delivery_tolerance_pct,
@@ -74,15 +99,28 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC            WHEN a.qual_due <= date_add(current_date(), 90)     THEN 'EXPIRING'
 # MAGIC            ELSE 'VALID'
 # MAGIC          END AS qual_status,
-# MAGIC          d.specification_no, d.edition_no, d.effective_date AS spec_effective_date, d.pdf_manufacturer,
-# MAGIC          COALESCE(d.n_lines > 0, FALSE) AS has_spec
+# MAGIC          COALESCE(d1.specification_no, d2.specification_no) AS specification_no,
+# MAGIC          COALESCE(d1.edition_no, d2.edition_no)             AS edition_no,
+# MAGIC          COALESCE(d1.effective_date, d2.effective_date)     AS spec_effective_date,
+# MAGIC          COALESCE(d1.pdf_manufacturer, d2.pdf_manufacturer) AS pdf_manufacturer,
+# MAGIC          CASE WHEN d1.specification_no IS NOT NULL THEN 'MPN'
+# MAGIC               WHEN d2.specification_no IS NOT NULL THEN 'MATERIAL_CODE' END AS spec_match,
+# MAGIC          COALESCE(COALESCE(d1.n_lines, d2.n_lines) > 0, FALSE) AS has_spec
 # MAGIC   FROM silver.dim_pr_open_pkg p
-# MAGIC   LEFT JOIN silver.dim_avl_vendor a ON a.item_code = p.material
+# MAGIC   LEFT JOIN avl a ON a.item_code = p.material
 # MAGIC   LEFT JOIN vp ON vp.pr_line = p.pr_line AND vp.mpn = a.mpn AND vp.supplier_code <=> a.supplier_code
-# MAGIC   LEFT JOIN silver.dim_spec_doc d   ON d.mpn = a.mpn AND d.is_latest AND d.mpn <> ''
+# MAGIC   LEFT JOIN po12 h ON h.material = p.material AND h.mpn = a.mpn AND h.currency <=> a.last_po_currency AND h.uom <=> a.last_po_unit
+# MAGIC   -- Specification match (client rule): by MPN first (PDF file name starts with the vendor's MPN);
+# MAGIC   -- only when there is no MPN match, by material code (some PDF file names start with the material code, e.g. 20451_CAR_PLAIN...).
+# MAGIC   -- dim_spec_doc.mpn holds the digits at the start of the file name, whichever of the two it is.
+# MAGIC   LEFT JOIN silver.dim_spec_doc d1  ON d1.mpn = a.mpn AND d1.is_latest AND d1.mpn <> ''
+# MAGIC   LEFT JOIN silver.dim_spec_doc d2  ON d1.specification_no IS NULL AND a.mpn IS NOT NULL
+# MAGIC                                    AND d2.mpn = p.material AND d2.is_latest AND d2.mpn <> ''
 # MAGIC ),
 # MAGIC roled AS (
 # MAGIC   SELECT *,
+# MAGIC     CASE WHEN po_vs_info_record_pct IS NULL THEN NULL
+# MAGIC          WHEN ABS(po_vs_info_record_pct) > 0.10 THEN 'Over 10%' ELSE 'Within 10%' END AS po_vs_info_record_flag,
 # MAGIC     CASE
 # MAGIC       WHEN last_po_date >= add_months(current_date(), -12)                   THEN 'CURRENT'
 # MAGIC       WHEN last_po_date IS NOT NULL AND qual_status IN ('VALID', 'EXPIRING') THEN 'HISTORICAL'
@@ -122,13 +160,14 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 
 # MAGIC %sql
 # MAGIC CREATE OR REPLACE VIEW gold.v_vendor_spec AS
-# MAGIC WITH vend AS (
+# MAGIC WITH vend AS (   -- the specification (found by MPN, else by material code) is already resolved in v_vendor_options
 # MAGIC   SELECT pr_line, mpn, MAX(material) AS material, MAX(manufacturer_name) AS manufacturer_name,
-# MAGIC          MAX_BY(qual_status, qual_due) AS qual_status
-# MAGIC   FROM gold.v_vendor_options WHERE mpn IS NOT NULL GROUP BY pr_line, mpn
+# MAGIC          MAX_BY(qual_status, qual_due) AS qual_status,
+# MAGIC          MAX(specification_no) AS specification_no, MAX(edition_no) AS edition_no, MAX(spec_match) AS spec_match
+# MAGIC   FROM gold.v_vendor_options WHERE mpn IS NOT NULL AND has_spec GROUP BY pr_line, mpn
 # MAGIC )
 # MAGIC SELECT DISTINCT v.pr_line, v.material, v.mpn, v.manufacturer_name, v.qual_status,
-# MAGIC        d.specification_no, d.edition_no, p.test_seq, p.seg_no, p.parameter, p.component,
+# MAGIC        v.specification_no, v.edition_no, v.spec_match, p.test_seq, p.seg_no, p.parameter, p.component,
 # MAGIC        CONCAT_WS(' ', p.parameter, CASE WHEN p.component IS NULL THEN NULL ELSE CONCAT('(', p.component, ')') END) AS parameter_label,
 # MAGIC        CASE WHEN p.parse_status LIKE 'PARSED_%' THEN 'NUMERIC' ELSE 'TEXT' END AS spec_type,
 # MAGIC        CASE WHEN p.parse_status LIKE 'PARSED_%' THEN
@@ -139,8 +178,7 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC                      ELSE CONCAT(p.spec_min, ' - ', p.spec_max) END, p.unit)
 # MAGIC             ELSE p.spec_line END AS spec_text
 # MAGIC FROM vend v
-# MAGIC JOIN silver.dim_spec_doc d ON d.mpn = v.mpn AND d.is_latest AND d.mpn <> ''
-# MAGIC JOIN silver.dim_spec_test_parsed p ON p.specification_no = d.specification_no AND p.edition_no = d.edition_no
+# MAGIC JOIN silver.dim_spec_test_parsed p ON p.specification_no = v.specification_no AND p.edition_no = v.edition_no
 # MAGIC WHERE p.parse_status NOT IN ('NO_SPEC_TEXT', 'SKIPPED_SUMMARY_ROW') AND p.spec_line IS NOT NULL AND p.parameter IS NOT NULL;
 
 # COMMAND ----------
@@ -272,6 +310,7 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC        COALESCE(e.exception_count, 0)    AS exception_count,
 # MAGIC        CASE WHEN COALESCE(e.exception_count, 0) = 0 THEN 'No_Exception' ELSE 'Has_Exceptions' END AS action_status,
 # MAGIC        e.exception_reasons,
+# MAGIC        COALESCE(p.po_cancelled_reopened, FALSE) AS po_cancelled_reopened, p.cancelled_pos,   -- PO created with quantity 0 (cancelled): the PR is open again
 # MAGIC        -- kept because the dashboard reads them (line-level flag; reason text based on vendors / specs)
 # MAGIC        CASE WHEN COALESCE(e.exception_count, 0) > 0 THEN 'Has exceptions' ELSE 'No exceptions' END AS line_exception_flag,
 # MAGIC        CASE WHEN COALESCE(v.approved_vendors, 0) = 0 THEN 'No approved vendor in the AVL for this material'
@@ -322,7 +361,9 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # MAGIC        CASE WHEN SUM(CASE WHEN s.action_status = 'Has_Exceptions' THEN 1 ELSE 0 END) = 0 THEN 'No_Exception' ELSE 'Has_Exceptions' END AS action_status,
 # MAGIC        -- A PR can move forward if at least one line has no exception, and it needs attention if at least one line has exceptions: a mixed PR is both.
 # MAGIC        SUM(CASE WHEN s.action_status = 'No_Exception'   THEN 1 ELSE 0 END) > 0 AS has_no_exception_line,
-# MAGIC        SUM(CASE WHEN s.action_status = 'Has_Exceptions' THEN 1 ELSE 0 END) > 0 AS has_exception_line
+# MAGIC        SUM(CASE WHEN s.action_status = 'Has_Exceptions' THEN 1 ELSE 0 END) > 0 AS has_exception_line,
+# MAGIC        SUM(CASE WHEN s.po_cancelled_reopened THEN 1 ELSE 0 END)           AS lines_cancelled_reopened,
+# MAGIC        SUM(CASE WHEN s.po_cancelled_reopened THEN 1 ELSE 0 END) > 0       AS has_cancelled_reopened
 # MAGIC FROM gold.v_pr_summary s
 # MAGIC GROUP BY s.pr;
 

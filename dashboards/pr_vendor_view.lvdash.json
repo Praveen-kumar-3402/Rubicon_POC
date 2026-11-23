@@ -7,7 +7,8 @@
         "SELECT\n",
         "  vs.*,\n",
         "  s.pr,\n",
-        "  s.material_name\n",
+        "  s.material_name,\n",
+        "  concat(vs.material, ' - ', s.material_name) AS material_search\n",
         "FROM\n",
         "  gold.v_vendor_spec vs\n",
         "    JOIN gold.v_pr_summary s\n",
@@ -74,6 +75,7 @@
         "  exception_count,\n",
         "  lines_with_exceptions,\n",
         "  lines_without_exceptions,\n",
+        "  lines_cancelled_reopened,\n",
         "  coalesce(x.has_red, false) AS has_exception_line,\n",
         "  coalesce(x.has_ok, false) AS has_no_exception_line,\n",
         "  CASE WHEN x.has_red THEN 1 ELSE 0 END AS has_exception_line_n,\n",
@@ -98,6 +100,8 @@
         "      GROUP BY pr\n",
         "    ) x USING (pr)\n",
         "WHERE\n",
+        "  (coalesce(:mat_filter, '') = '' OR pr IN (SELECT ms.pr FROM gold.v_pr_summary ms WHERE ms.material = :mat_filter))\n",
+        "  AND (\n",
         "  :exc_scope IS NULL\n",
         "  OR size(:exc_scope) = 0\n",
         "  OR (\n",
@@ -108,6 +112,7 @@
         "    x.has_ok\n",
         "    AND array_contains(:exc_scope, 'No exceptions')\n",
         "  )\n",
+        "  )\n",
         "ORDER BY\n",
         "  CASE priority\n",
         "    WHEN 'NEW' THEN 1\n",
@@ -117,7 +122,7 @@
       ],
       "parameters": [
         {
-          "displayName": "Exceptions",
+          "displayName": "exc_scope",
           "keyword": "exc_scope",
           "dataType": "STRING",
           "complexType": "MULTI",
@@ -130,6 +135,21 @@
                 },
                 {
                   "value": "No exceptions"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Material code",
+          "keyword": "mat_filter",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
                 }
               ]
             }
@@ -149,6 +169,7 @@
         "  initcap(e.pack_category) AS pack_category,\n",
         "  e.material,\n",
         "  e.material_name,\n",
+        "  concat(e.material, ' - ', e.material_name) AS material_search,\n",
         "  e.pr_date,\n",
         "  replace(initcap(replace(e.exception, '_', ' ')), 'Avl', 'AVL') AS exception,\n",
         "  e.reason,\n",
@@ -208,6 +229,7 @@
         "  pr_date,\n",
         "  material,\n",
         "  material_name,\n",
+        "  concat(material, ' - ', material_name) AS material_search,\n",
         "  initcap(pack_category) AS pack_category,\n",
         "  plant,\n",
         "  qty,\n",
@@ -222,6 +244,8 @@
         "  tat_missed_bucket,\n",
         "  replace(initcap(replace(action_status, '_', ' ')), 'Avl', 'AVL') AS action_status,\n",
         "  non_action_reason,\n",
+        "  CASE WHEN po_cancelled_reopened THEN 'Yes' ELSE 'No' END AS po_cancelled_reopened,\n",
+        "  cancelled_pos,\n",
         "  approved_vendors,\n",
         "  qualified_vendors,\n",
         "  vendors_with_spec,\n",
@@ -406,6 +430,7 @@
         "  v.pr_line,\n",
         "  v.material,\n",
         "  s.material_name,\n",
+        "  concat(v.material, ' - ', s.material_name) AS material_search,\n",
         "  v.manufacturer_name,\n",
         "  v.supplier_name,\n",
         "  CASE v.vendor_role\n",
@@ -432,6 +457,18 @@
         "  v.last_po_qty,\n",
         "  v.last_po_unit,\n",
         "  v.last_po_delivery_date,\n",
+        "  v.last_po_rate,\n",
+        "  v.last_po_currency,\n",
+        "  CASE WHEN v.last_po_rate IS NOT NULL THEN concat(v.last_po_currency, ' ', format_number(v.last_po_rate, 2), ' per ', v.last_po_unit) END AS last_po_rate_text,\n",
+        "  CASE WHEN v.rate_12m_po_count > 0 THEN concat(v.last_po_currency, ' ', format_number(v.rate_12m_min, 2), ' - ', format_number(v.rate_12m_max, 2), ' (avg ', format_number(v.rate_12m_avg, 2), ', ', v.rate_12m_po_count, ' PO', CASE WHEN v.rate_12m_po_count > 1 THEN 's' ELSE '' END, ')') END AS rate_12m_text,\n",
+        "  v.rate_12m_avg,\n",
+        "  v.rate_12m_min,\n",
+        "  v.rate_12m_max,\n",
+        "  v.rate_12m_po_count,\n",
+        "  v.po_vs_info_record_pct,\n",
+        "  CASE WHEN v.po_vs_info_record_pct IS NOT NULL THEN concat(CASE WHEN v.po_vs_info_record_pct > 0 THEN '+' ELSE '' END, format_number(v.po_vs_info_record_pct * 100, 1), '%') END AS po_vs_info_record_text,\n",
+        "  v.po_vs_info_record_flag,\n",
+        "  v.spec_match,\n",
         "  v.last_po_created_by,\n",
         "  v.has_spec,\n",
         "  v.specification_no,\n",
@@ -573,13 +610,16 @@
         "    JOIN gold.v_pr_list p\n",
         "      ON p.pr = l.pr\n",
         "WHERE\n",
+        "  (coalesce(:mat_filter, '') = '' OR l.pr IN (SELECT ms.pr FROM gold.v_pr_summary ms WHERE ms.material = :mat_filter))\n",
+        "  AND (\n",
         "  :exc_scope IS NULL\n",
         "  OR size(:exc_scope) = 0\n",
-        "  OR array_contains(:exc_scope, l.exception_scope)"
+        "  OR array_contains(:exc_scope, l.exception_scope)\n",
+        "  )"
       ],
       "parameters": [
         {
-          "displayName": "Exceptions",
+          "displayName": "exc_scope",
           "keyword": "exc_scope",
           "dataType": "STRING",
           "complexType": "MULTI",
@@ -592,6 +632,21 @@
                 },
                 {
                   "value": "No exceptions"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "Material code",
+          "keyword": "mat_filter",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": ""
                 }
               ]
             }
@@ -976,13 +1031,17 @@
                     {
                       "name": "exceptions",
                       "expression": "`exceptions`"
+                    },
+                    {
+                      "name": "lines_cancelled_reopened",
+                      "expression": "`lines_cancelled_reopened`"
                     }
                   ],
                   "disaggregated": true,
                   "orders": [
                     {
                       "direction": "ASC",
-                      "expression": "`plant`"
+                      "expression": "`exception_status`"
                     }
                   ]
                 }
@@ -1083,6 +1142,7 @@
                   },
                   {
                     "fieldName": "buyer",
+                    "useForSearch": false,
                     "displayName": "PR Requestor"
                   },
                   {
@@ -1149,13 +1209,17 @@
                   },
                   {
                     "fieldName": "exceptions"
+                  },
+                  {
+                    "fieldName": "lines_cancelled_reopened",
+                    "displayName": "Lines reopened (PO cancelled)"
                   }
                 ],
                 "rowOrder": [
                   {
                     "by": "column",
                     "field": {
-                      "index": 8
+                      "index": 1
                     }
                   }
                 ]
@@ -1209,6 +1273,23 @@
                   ],
                   "disaggregated": false
                 }
+              },
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb9a222faf93d688385_buyer",
+                "query": {
+                  "datasetName": "ds_buyers",
+                  "fields": [
+                    {
+                      "name": "buyer",
+                      "expression": "`buyer`"
+                    },
+                    {
+                      "name": "buyer_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
               }
             ],
             "spec": {
@@ -1230,6 +1311,10 @@
                   {
                     "fieldName": "buyer",
                     "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e1b6c685118bba333a3d9120b46b_buyer"
+                  },
+                  {
+                    "fieldName": "buyer",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb9a222faf93d688385_buyer"
                   }
                 ]
               }
@@ -1378,7 +1463,7 @@
           "position": {
             "x": 0,
             "y": 3,
-            "width": 6,
+            "width": 4,
             "height": 2
           }
         },
@@ -1446,9 +1531,9 @@
             }
           },
           "position": {
-            "x": 6,
+            "x": 4,
             "y": 3,
-            "width": 6,
+            "width": 4,
             "height": 2
           }
         },
@@ -1473,6 +1558,86 @@
             "y": 8,
             "width": 12,
             "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "f_material_code",
+            "queries": [
+              {
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7b4f5287e99d87fd8_material",
+                "query": {
+                  "datasetName": "ds_pr_materials",
+                  "fields": [
+                    {
+                      "name": "material",
+                      "expression": "`material`"
+                    },
+                    {
+                      "name": "material_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb6920eb08cea8f2381_mat_filter",
+                "query": {
+                  "datasetName": "ds_pr_list",
+                  "parameters": [
+                    {
+                      "name": "mat_filter",
+                      "keyword": "mat_filter"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e1b6c685118bba333a3d9120b46b_mat_filter",
+                "query": {
+                  "datasetName": "ds_pr_exception_scope",
+                  "parameters": [
+                    {
+                      "name": "mat_filter",
+                      "keyword": "mat_filter"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Material code"
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "material",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7b4f5287e99d87fd8_material"
+                  },
+                  {
+                    "parameterName": "mat_filter",
+                    "queryName": "parameter_dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb6920eb08cea8f2381_mat_filter"
+                  },
+                  {
+                    "parameterName": "mat_filter",
+                    "queryName": "parameter_dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e1b6c685118bba333a3d9120b46b_mat_filter"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 3,
+            "width": 4,
+            "height": 2
           }
         }
       ],
@@ -1599,6 +1764,7 @@
             "spec": {
               "frame": {
                 "showTitle": true,
+                "showDescription": false,
                 "title": {
                   "value": "PR creators/Requestors and their PRs",
                   "fields": []
@@ -2027,6 +2193,14 @@
                       "expression": "`non_action_reason`"
                     },
                     {
+                      "name": "po_cancelled_reopened",
+                      "expression": "`po_cancelled_reopened`"
+                    },
+                    {
+                      "name": "cancelled_pos",
+                      "expression": "`cancelled_pos`"
+                    },
+                    {
                       "name": "source_type",
                       "expression": "`source_type`"
                     },
@@ -2214,6 +2388,30 @@
                     "fieldName": "non_action_reason"
                   },
                   {
+                    "fieldName": "po_cancelled_reopened",
+                    "displayName": "PO cancelled, PR reopened",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Yes"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#E0A100",
+                          "foregroundColor": "#333333"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "cancelled_pos",
+                    "displayName": "Cancelled POs"
+                  },
+                  {
                     "fieldName": "source_type"
                   },
                   {
@@ -2247,16 +2445,16 @@
             "name": "3fe826d9",
             "queries": [
               {
-                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7b4f5287e99d87fd8_material_name",
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7b4f5287e99d87fd8_material_search",
                 "query": {
                   "datasetName": "ds_pr_materials",
                   "fields": [
                     {
-                      "name": "material_name",
-                      "expression": "`material_name`"
+                      "name": "material_search",
+                      "expression": "`material_search`"
                     },
                     {
-                      "name": "material_name_associativity",
+                      "name": "material_search_associativity",
                       "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
@@ -2264,16 +2462,16 @@
                 }
               },
               {
-                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb8b24c8271aafe436b_material_name",
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb8b24c8271aafe436b_material_search",
                 "query": {
                   "datasetName": "ds_material_vendors",
                   "fields": [
                     {
-                      "name": "material_name",
-                      "expression": "`material_name`"
+                      "name": "material_search",
+                      "expression": "`material_search`"
                     },
                     {
-                      "name": "material_name_associativity",
+                      "name": "material_search_associativity",
                       "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
@@ -2281,16 +2479,16 @@
                 }
               },
               {
-                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb2b2025fc7b1a70851_material_name",
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb2b2025fc7b1a70851_material_search",
                 "query": {
                   "datasetName": "ds_vendor_spec",
                   "fields": [
                     {
-                      "name": "material_name",
-                      "expression": "`material_name`"
+                      "name": "material_search",
+                      "expression": "`material_search`"
                     },
                     {
-                      "name": "material_name_associativity",
+                      "name": "material_search_associativity",
                       "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
@@ -2298,16 +2496,16 @@
                 }
               },
               {
-                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7847728d20eb044fa_material_name",
+                "name": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7847728d20eb044fa_material_search",
                 "query": {
                   "datasetName": "ds_exceptions_detail",
                   "fields": [
                     {
-                      "name": "material_name",
-                      "expression": "`material_name`"
+                      "name": "material_search",
+                      "expression": "`material_search`"
                     },
                     {
-                      "name": "material_name_associativity",
+                      "name": "material_search_associativity",
                       "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
@@ -2319,29 +2517,26 @@
               "version": 2,
               "frame": {
                 "showTitle": true,
-                "title": {
-                  "value": "Select Material",
-                  "fields": []
-                }
+                "title": "Search Material (code or name)"
               },
               "widgetType": "filter-single-select",
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "material_name",
-                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7b4f5287e99d87fd8_material_name"
+                    "fieldName": "material_search",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7b4f5287e99d87fd8_material_search"
                   },
                   {
-                    "fieldName": "material_name",
-                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb8b24c8271aafe436b_material_name"
+                    "fieldName": "material_search",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb8b24c8271aafe436b_material_search"
                   },
                   {
-                    "fieldName": "material_name",
-                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb2b2025fc7b1a70851_material_name"
+                    "fieldName": "material_search",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb2b2025fc7b1a70851_material_search"
                   },
                   {
-                    "fieldName": "material_name",
-                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7847728d20eb044fa_material_name"
+                    "fieldName": "material_search",
+                    "queryName": "dashboards/01f1d9e1f8051e5295ef764e8240e477/datasets/01f1e185ccfb1cb7847728d20eb044fa_material_search"
                   }
                 ]
               }
@@ -2611,6 +2806,22 @@
                       "expression": "`price_text`"
                     },
                     {
+                      "name": "last_po_rate_text",
+                      "expression": "`last_po_rate_text`"
+                    },
+                    {
+                      "name": "rate_12m_text",
+                      "expression": "`rate_12m_text`"
+                    },
+                    {
+                      "name": "po_vs_info_record_text",
+                      "expression": "`po_vs_info_record_text`"
+                    },
+                    {
+                      "name": "po_vs_info_record_flag",
+                      "expression": "`po_vs_info_record_flag`"
+                    },
+                    {
                       "name": "lead_time_days",
                       "expression": "`lead_time_days`"
                     },
@@ -2663,6 +2874,10 @@
                       "expression": "`specification_no`"
                     },
                     {
+                      "name": "spec_match",
+                      "expression": "`spec_match`"
+                    },
+                    {
                       "name": "edition_no",
                       "expression": "`edition_no`"
                     },
@@ -2705,6 +2920,49 @@
                   {
                     "fieldName": "price_text",
                     "displayName": "Last agreed price"
+                  },
+                  {
+                    "fieldName": "last_po_rate_text",
+                    "displayName": "Last PO rate"
+                  },
+                  {
+                    "fieldName": "rate_12m_text",
+                    "displayName": "12-month PO rate (min - max, avg)"
+                  },
+                  {
+                    "fieldName": "po_vs_info_record_text",
+                    "displayName": "PO rate vs Info Record price"
+                  },
+                  {
+                    "fieldName": "po_vs_info_record_flag",
+                    "displayName": "Price check (10%)",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Over 10%"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#C8372D",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Within 10%"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#2E8B57",
+                          "foregroundColor": "#FFFFFF"
+                        }
+                      ]
+                    }
                   },
                   {
                     "fieldName": "lead_time_days"
@@ -2793,6 +3051,10 @@
                   },
                   {
                     "fieldName": "specification_no"
+                  },
+                  {
+                    "fieldName": "spec_match",
+                    "displayName": "Spec matched by"
                   },
                   {
                     "fieldName": "edition_no"
