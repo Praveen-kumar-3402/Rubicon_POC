@@ -36,7 +36,7 @@ spark.sql(f"USE SCHEMA {SCHEMA}")
 # COMMAND ----------
 
 # All columns stay STRING on purpose so codes keep their exact format.
-SOURCES = {"avl_october": "avl", "me2n": "me2n", "me5a": "me5a", "zmm30": "zmm30"}   # csv file name -> bronze table
+SOURCES = {"avl_october": "avl", "ME2N with Rate": "me2n", "me5a": "me5a", "zmm30": "zmm30"}   # csv file name -> bronze table
 
 def snake(c):
     """'Purchasing Info Rec.' -> 'purchasing_info_rec'"""

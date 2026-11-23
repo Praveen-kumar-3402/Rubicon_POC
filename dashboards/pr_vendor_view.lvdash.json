@@ -75,6 +75,7 @@
         "  exception_count,\n",
         "  lines_with_exceptions,\n",
         "  lines_without_exceptions,\n",
+        "  lines_cancelled_reopened,\n",
         "  coalesce(x.has_red, false) AS has_exception_line,\n",
         "  coalesce(x.has_ok, false) AS has_no_exception_line,\n",
         "  CASE WHEN x.has_red THEN 1 ELSE 0 END AS has_exception_line_n,\n",
@@ -243,6 +244,8 @@
         "  tat_missed_bucket,\n",
         "  replace(initcap(replace(action_status, '_', ' ')), 'Avl', 'AVL') AS action_status,\n",
         "  non_action_reason,\n",
+        "  CASE WHEN po_cancelled_reopened THEN 'Yes' ELSE 'No' END AS po_cancelled_reopened,\n",
+        "  cancelled_pos,\n",
         "  approved_vendors,\n",
         "  qualified_vendors,\n",
         "  vendors_with_spec,\n",
@@ -454,6 +457,18 @@
         "  v.last_po_qty,\n",
         "  v.last_po_unit,\n",
         "  v.last_po_delivery_date,\n",
+        "  v.last_po_rate,\n",
+        "  v.last_po_currency,\n",
+        "  CASE WHEN v.last_po_rate IS NOT NULL THEN concat(v.last_po_currency, ' ', format_number(v.last_po_rate, 2), ' per ', v.last_po_unit) END AS last_po_rate_text,\n",
+        "  CASE WHEN v.rate_12m_po_count > 0 THEN concat(v.last_po_currency, ' ', format_number(v.rate_12m_min, 2), ' - ', format_number(v.rate_12m_max, 2), ' (avg ', format_number(v.rate_12m_avg, 2), ', ', v.rate_12m_po_count, ' PO', CASE WHEN v.rate_12m_po_count > 1 THEN 's' ELSE '' END, ')') END AS rate_12m_text,\n",
+        "  v.rate_12m_avg,\n",
+        "  v.rate_12m_min,\n",
+        "  v.rate_12m_max,\n",
+        "  v.rate_12m_po_count,\n",
+        "  v.po_vs_info_record_pct,\n",
+        "  CASE WHEN v.po_vs_info_record_pct IS NOT NULL THEN concat(CASE WHEN v.po_vs_info_record_pct > 0 THEN '+' ELSE '' END, format_number(v.po_vs_info_record_pct * 100, 1), '%') END AS po_vs_info_record_text,\n",
+        "  v.po_vs_info_record_flag,\n",
+        "  v.spec_match,\n",
         "  v.last_po_created_by,\n",
         "  v.has_spec,\n",
         "  v.specification_no,\n",
@@ -1016,6 +1031,10 @@
                     {
                       "name": "exceptions",
                       "expression": "`exceptions`"
+                    },
+                    {
+                      "name": "lines_cancelled_reopened",
+                      "expression": "`lines_cancelled_reopened`"
                     }
                   ],
                   "disaggregated": true,
@@ -1190,6 +1209,10 @@
                   },
                   {
                     "fieldName": "exceptions"
+                  },
+                  {
+                    "fieldName": "lines_cancelled_reopened",
+                    "displayName": "Lines reopened (PO cancelled)"
                   }
                 ],
                 "rowOrder": [
@@ -2170,6 +2193,14 @@
                       "expression": "`non_action_reason`"
                     },
                     {
+                      "name": "po_cancelled_reopened",
+                      "expression": "`po_cancelled_reopened`"
+                    },
+                    {
+                      "name": "cancelled_pos",
+                      "expression": "`cancelled_pos`"
+                    },
+                    {
                       "name": "source_type",
                       "expression": "`source_type`"
                     },
@@ -2355,6 +2386,30 @@
                   },
                   {
                     "fieldName": "non_action_reason"
+                  },
+                  {
+                    "fieldName": "po_cancelled_reopened",
+                    "displayName": "PO cancelled, PR reopened",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Yes"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#E0A100",
+                          "foregroundColor": "#333333"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "fieldName": "cancelled_pos",
+                    "displayName": "Cancelled POs"
                   },
                   {
                     "fieldName": "source_type"
@@ -2751,6 +2806,22 @@
                       "expression": "`price_text`"
                     },
                     {
+                      "name": "last_po_rate_text",
+                      "expression": "`last_po_rate_text`"
+                    },
+                    {
+                      "name": "rate_12m_text",
+                      "expression": "`rate_12m_text`"
+                    },
+                    {
+                      "name": "po_vs_info_record_text",
+                      "expression": "`po_vs_info_record_text`"
+                    },
+                    {
+                      "name": "po_vs_info_record_flag",
+                      "expression": "`po_vs_info_record_flag`"
+                    },
+                    {
                       "name": "lead_time_days",
                       "expression": "`lead_time_days`"
                     },
@@ -2803,6 +2874,10 @@
                       "expression": "`specification_no`"
                     },
                     {
+                      "name": "spec_match",
+                      "expression": "`spec_match`"
+                    },
+                    {
                       "name": "edition_no",
                       "expression": "`edition_no`"
                     },
@@ -2845,6 +2920,49 @@
                   {
                     "fieldName": "price_text",
                     "displayName": "Last agreed price"
+                  },
+                  {
+                    "fieldName": "last_po_rate_text",
+                    "displayName": "Last PO rate"
+                  },
+                  {
+                    "fieldName": "rate_12m_text",
+                    "displayName": "12-month PO rate (min - max, avg)"
+                  },
+                  {
+                    "fieldName": "po_vs_info_record_text",
+                    "displayName": "PO rate vs Info Record price"
+                  },
+                  {
+                    "fieldName": "po_vs_info_record_flag",
+                    "displayName": "Price check (10%)",
+                    "style": {
+                      "type": "basic",
+                      "rules": [
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Over 10%"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#C8372D",
+                          "foregroundColor": "#FFFFFF"
+                        },
+                        {
+                          "condition": {
+                            "operand": {
+                              "type": "data-value",
+                              "value": "Within 10%"
+                            },
+                            "operator": "="
+                          },
+                          "backgroundColor": "#2E8B57",
+                          "foregroundColor": "#FFFFFF"
+                        }
+                      ]
+                    }
                   },
                   {
                     "fieldName": "lead_time_days"
@@ -2933,6 +3051,10 @@
                   },
                   {
                     "fieldName": "specification_no"
+                  },
+                  {
+                    "fieldName": "spec_match",
+                    "displayName": "Spec matched by"
                   },
                   {
                     "fieldName": "edition_no"
