@@ -203,6 +203,9 @@ def build_pr():
            COALESCE(z.zmm30_created_by, m.me5a_created_by)                           AS buyer_id,
            z.l1_release_date, z.l2_release_date, z.final_release_date,
            (z.l1_release_date IS NULL) AS l1_release_missing,
+           -- cancelled and reopened (client): a PO was created but its ordered quantity is 0 = cancelled PO, the PR is open again.
+           (m.purchase_order IS NOT NULL AND COALESCE(m.qty_ordered, 0) = 0) AS po_cancelled_reopened,
+           CASE WHEN m.purchase_order IS NOT NULL AND COALESCE(m.qty_ordered, 0) = 0 THEN m.purchase_order END AS cancelled_pos,
            COALESCE(z.final_release_date, m.pr_date) AS tat_start_date,
            CASE WHEN z.final_release_date IS NOT NULL THEN 'FINAL_RELEASE' ELSE 'REQUISITION' END AS tat_start_source,
            r.standard_days AS tat_standard_days, r.risk_max_remaining AS tat_risk_max_remaining,
@@ -225,25 +228,34 @@ merge_snapshot(build_pr, "dim_pr_open_pkg", ["pr_line"],
 # Future-dated rows are KEPT (client decision). Rows with no MPN, or SAP code equal to the material code, are dropped.
 # AVL: DISTINCT removes exact duplicate rows; supplier_code "30889.0" becomes "30889"; date_suspect flags impossible dates.
 # 145 (item, MPN) pairs have different qual_due values across supplier rows; they are kept (open client question).
+def make_po_clean():
+    """ME2N purchase-order items in scope, with quantity, value, rate and currency.
+    Zero-value POs are cancelled POs (client: the PR becomes open again) and are left out, so they never count as a purchase."""
+    spark.sql("""
+    CREATE OR REPLACE TEMP VIEW po_clean AS
+    SELECT NULLIF(TRIM(material), '') AS material, NULLIF(TRIM(sap_code), '') AS mpn,
+           TRIM(purchasing_document) AS po, TRY_CAST(TRIM(item) AS INT) AS po_item,
+           TRY_CAST(document_date AS DATE) AS document_date,
+           TRY_CAST(TRIM(po_quantity) AS DOUBLE) AS po_qty, NULLIF(TRIM(unit_of_measure), '') AS uom,
+           TRY_CAST(TRIM(po_value) AS DOUBLE) AS po_value, NULLIF(TRIM(currency), '') AS currency,
+           TRY_CAST(TRIM(po_value) AS DOUBLE) / TRY_CAST(TRIM(po_quantity) AS DOUBLE) AS rate   -- PO value / quantity: also right when the price unit differs from the order unit
+    FROM bronze.me2n
+    WHERE LEFT(TRIM(plant), 1) = '1'
+      AND LEFT(TRIM(purchasing_document), 1) = '4'
+      AND NULLIF(TRIM(deletion_indicator), '') IS NULL
+      AND NULLIF(TRIM(material), '') IS NOT NULL
+      AND NULLIF(TRIM(sap_code), '') IS NOT NULL
+      AND NULLIF(TRIM(sap_code), '') <> NULLIF(TRIM(material), '')
+      AND TRY_CAST(TRIM(po_quantity) AS DOUBLE) > 0
+      AND TRY_CAST(TRIM(po_value) AS DOUBLE) > 0""")
+
 def build_avl():
+    make_po_clean()
     spark.sql("""
     CREATE OR REPLACE TEMP VIEW po_by_mpn AS
-    WITH po AS (
-      SELECT NULLIF(TRIM(material), '') AS material, NULLIF(TRIM(sap_code), '') AS mpn,
-             TRIM(purchasing_document) AS po, TRY_CAST(TRIM(item) AS INT) AS po_item,
-             TRY_CAST(document_date AS DATE) AS document_date
-      FROM bronze.me2n
-      WHERE LEFT(TRIM(plant), 1) = '1'
-        AND LEFT(TRIM(purchasing_document), 1) = '4'
-        AND NULLIF(TRIM(deletion_indicator), '') IS NULL
-        AND NULLIF(TRIM(material), '') IS NOT NULL
-        AND NULLIF(TRIM(sap_code), '') IS NOT NULL
-        AND NULLIF(TRIM(sap_code), '') <> NULLIF(TRIM(material), '')
-    ),
-    z AS (   -- ZMM30 repeats a PO item once per PR line: one row per PO item
+    WITH po AS (SELECT * FROM po_clean),
+    z AS (   -- ZMM30 repeats a PO item once per PR line: one row per PO item (creator and dates only; quantity and unit now come from ME2N)
       SELECT TRIM(purchase_order) AS po, TRY_CAST(TRIM(po_item) AS INT) AS po_item,
-             MAX(TRY_CAST(po_quantity AS DOUBLE))                     AS qty,
-             MAX(NULLIF(TRIM(order_unit), ''))                        AS unit,
              MAX(NULLIF(TRIM(po_created_by), ''))                     AS created_by,
              MAX(TRY_CAST(LEFT(TRIM(po_creation_date), 10) AS DATE))  AS created_on,
              MAX(TRY_CAST(LEFT(TRIM(po_delivery_date), 10) AS DATE))  AS delivery_date
@@ -253,7 +265,8 @@ def build_avl():
       SELECT *, ROW_NUMBER() OVER (PARTITION BY material, mpn ORDER BY document_date DESC, po DESC, po_item DESC) AS rn FROM po
     )
     SELECT g.material, g.mpn, g.po_count, g.last_po_date,
-           l.po AS last_po_number, z.qty AS last_po_qty, z.unit AS last_po_unit,
+           l.po AS last_po_number, l.po_qty AS last_po_qty, l.uom AS last_po_unit,
+           l.rate AS last_po_rate, l.currency AS last_po_currency,
            z.created_by AS last_po_created_by, z.created_on AS last_po_created_on, z.delivery_date AS last_po_delivery_date
     FROM (SELECT material, mpn, COUNT(DISTINCT po) AS po_count, MAX(document_date) AS last_po_date FROM po GROUP BY 1, 2) g
     JOIN lastpo l ON l.material = g.material AND l.mpn = g.mpn AND l.rn = 1
@@ -276,11 +289,19 @@ def build_avl():
     )
     SELECT sha2(concat_ws('|', a.item_code, a.material_description, a.mpn, a.manufacturer_code, a.manufacturer_name,
                           a.supplier_code, a.supplier_name, CAST(a.qual_due AS STRING)), 256) AS avl_key,
-           a.*, h.po_count, h.last_po_date, h.last_po_number, h.last_po_qty, h.last_po_unit,
+           a.*, h.po_count, h.last_po_date, h.last_po_number, h.last_po_qty, h.last_po_unit, h.last_po_rate, h.last_po_currency,
            h.last_po_created_by, h.last_po_created_on, h.last_po_delivery_date
     FROM avl a LEFT JOIN po_by_mpn h ON h.material = a.item_code AND h.mpn = a.mpn""")
 
 merge_snapshot(build_avl, "dim_avl_vendor", ["avl_key"], sources=["bronze.avl", "bronze.me2n", "bronze.zmm30"])
+
+# dim_po_rate : one row per PO item (history of PO rates per material + MPN), same scope as above. Gold computes the 12-month
+# average / min / max from it every day. rate = PO value / PO quantity, in the PO's own currency and unit (no conversion).
+def build_po_rate():
+    make_po_clean()
+    return spark.sql("SELECT material, mpn, po, po_item, document_date, po_qty, uom, po_value, rate, currency FROM po_clean")
+
+merge_snapshot(build_po_rate, "dim_po_rate", ["po", "po_item"], sources=["bronze.me2n"])
 
 # COMMAND ----------
 

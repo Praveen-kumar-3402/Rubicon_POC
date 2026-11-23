@@ -42,6 +42,17 @@ check("has_spec lines carry a specification and a match type", q(f"""SELECT COUN
 check("a vendor without a spec has no match type", q(f"""SELECT COUNT(*) FROM {CATALOG}.gold.v_vendor_options
     WHERE NOT has_spec AND spec_match IS NOT NULL""") == 0)
 
+check("PO rate history is not empty and has no zero or negative rates", q(f"SELECT COUNT(*) FROM {CATALOG}.silver.dim_po_rate WHERE rate IS NULL OR rate <= 0") == 0
+      and q(f"SELECT COUNT(*) FROM {CATALOG}.silver.dim_po_rate") > 0)
+check("every purchased vendor has a last PO rate and currency", q(f"""SELECT COUNT(*) FROM {CATALOG}.silver.dim_avl_vendor
+    WHERE po_count IS NOT NULL AND (last_po_rate IS NULL OR last_po_currency IS NULL)""") == 0)
+check("12-month min <= average <= max", q(f"""SELECT COUNT(*) FROM {CATALOG}.gold.v_vendor_options
+    WHERE rate_12m_avg IS NOT NULL AND NOT (rate_12m_min <= rate_12m_avg + 1e-9 AND rate_12m_avg <= rate_12m_max + 1e-9)""") == 0)
+check("PO vs Info Record flag only when a comparison exists", q(f"""SELECT COUNT(*) FROM {CATALOG}.gold.v_vendor_options
+    WHERE (po_vs_info_record_pct IS NULL) <> (po_vs_info_record_flag IS NULL)""") == 0)
+check("cancelled-and-reopened PR lines list their POs", q(f"""SELECT COUNT(*) FROM {CATALOG}.gold.v_pr_summary
+    WHERE po_cancelled_reopened AND cancelled_pos IS NULL""") == 0)
+
 # 4. the pipeline recorded itself and nothing failed
 check("no Failed rows in pipeline_metadata", q(f"SELECT COUNT(*) FROM {CATALOG}.metadata.pipeline_metadata WHERE last_run_status = 'Failed'") == 0)
 
